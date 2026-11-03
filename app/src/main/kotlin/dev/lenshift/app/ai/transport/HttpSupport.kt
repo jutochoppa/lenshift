@@ -64,8 +64,8 @@ object HttpSupport {
             "http" -> {
                 if (!profile.allowCleartext) {
                     throw AiError.InvalidEndpoint(
-                        "Plain HTTP is disabled. Use https://, or enable " +
-                            "\"Allow plain HTTP for local endpoints\" in Advanced settings."
+                        "Plain HTTP is off for this provider. Use https://, or turn on " +
+                            "\"Allow plain HTTP\" under Behaviour in this provider's settings."
                     )
                 }
                 val host = url.host.lowercase()

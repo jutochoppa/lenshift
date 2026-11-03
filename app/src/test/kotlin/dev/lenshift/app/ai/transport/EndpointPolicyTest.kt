@@ -4,6 +4,7 @@ import dev.lenshift.app.ai.AiError
 import dev.lenshift.app.ai.ApiProtocol
 import dev.lenshift.app.ai.ProviderProfile
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -54,6 +55,20 @@ class EndpointPolicyTest {
     @Test
     fun `cleartext is refused without the opt-in even for a private host`() {
         assertRefused(profile("http://192.168.1.20:11434", allowCleartext = false))
+    }
+
+    @Test
+    fun `the cleartext refusal points to the switch in the provider form`() {
+        // The opt-in is a per-provider switch. The message used to send people to
+        // Advanced settings, which has no such option.
+        try {
+            HttpSupport.validateBase(profile("http://192.168.1.20:11434"))
+            fail("plain HTTP without the opt-in must be refused")
+        } catch (e: AiError.InvalidEndpoint) {
+            assertTrue(e.detail, "\"Allow plain HTTP\"" in e.detail)
+            assertTrue(e.detail, "this provider" in e.detail)
+            assertFalse(e.detail, "Advanced settings" in e.detail)
+        }
     }
 
     @Test
