@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" role="img" aria-labelledby="hero-title hero-desc">
+  <title id="hero-title">Lenshift</title>
+  <desc id="hero-desc">Circle anything on your screen and ask the AI you choose. A phone shows a photo being circled and an answer with a graph sliding up.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1020"/>
+      <stop offset="1" stop-color="#141F40"/>
+    </linearGradient>
+    <radialGradient id="glow-left" cx="0.14" cy="0.22" r="0.6">
+      <stop offset="0" stop-color="#5EE7C8" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#5EE7C8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow-phone" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7C8CFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#7C8CFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5EE7C8"/>
+      <stop offset="1" stop-color="#9DB8FF"/>
+    </linearGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.3" fill="#FFFFFF" fill-opacity="0.06"/>
+    </pattern>
+    <filter id="soft-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="screen"><rect x="12" y="12" width="276" height="396" rx="28"/></clipPath>
+    <clipPath id="photo"><rect x="32" y="84" width="236" height="124" rx="16"/></clipPath>
+  </defs>
+  <style>
+    .title { font: 700 84px 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; fill: #FFFFFF; letter-spacing: -1.5px; }
+    .tag { font: 400 31px 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; fill: #B9C5E4; }
+    .tag-strong { font: 600 31px 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; fill: url(#ink); }
+    .chip { font: 600 18px 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; fill: #CFFAF0; }
+    .foot { font: 400 18px 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; fill: #7F8BB0; }
+    .formula { font: 500 18px 'Cascadia Code', Consolas, 'SF Mono', Menlo, monospace; fill: #CFFAF0; }
+    .lasso { stroke-dasharray: 100; stroke-dashoffset: 0; animation: draw 8s ease-in-out infinite both; }
+    .lasso-fill { animation: shade 8s ease-in-out infinite both; }
+    .sheet { animation: rise 8s cubic-bezier(.2, .8, .2, 1) infinite both; }
+    .float { animation: float 6s ease-in-out infinite; }
+    .float-late { animation: float 6s ease-in-out -3s infinite; }
+    @keyframes draw {
+      0%, 6% { stroke-dashoffset: 100; opacity: 1; }
+      30%, 84% { stroke-dashoffset: 0; opacity: 1; }
+      94%, 100% { stroke-dashoffset: 0; opacity: 0; }
+    }
+    @keyframes shade {
+      0%, 30% { opacity: 0; }
+      38%, 84% { opacity: 1; }
+      94%, 100% { opacity: 0; }
+    }
+    @keyframes rise {
+      0%, 36% { transform: translateY(200px); }
+      50%, 86% { transform: translateY(0); }
+      98%, 100% { transform: translateY(200px); }
+    }
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-9px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .lasso, .lasso-fill, .sheet, .float, .float-late { animation: none; }
+    }
+  </style>
+
+  <rect width="1200" height="500" rx="28" fill="url(#bg)"/>
+  <rect width="1200" height="500" rx="28" fill="url(#dots)"/>
+  <rect width="1200" height="500" rx="28" fill="url(#glow-left)"/>
+
+  <!-- Mark: an open ring (lens) with an upward shift arrow -->
+  <g transform="translate(66 68) scale(1.3)" filter="url(#soft-glow)">
+    <path d="M54,26 A28,28 0 1,1 53.9,26" fill="none" stroke="#5EE7C8" stroke-width="6" stroke-linecap="round"/>
+    <path d="M54,40 L66,54 L58,54 L58,70 L50,70 L50,54 L42,54 Z" fill="#5EE7C8"/>
+  </g>
+  <text class="title" x="214" y="166">Lenshift</text>
+
+  <text class="tag" x="72" y="258">Circle anything on your screen.</text>
+  <text class="tag-strong" x="72" y="302">Ask the AI you choose.</text>
+
+  <g>
+    <rect x="72" y="342" width="178" height="40" rx="20" fill="#5EE7C8" fill-opacity="0.10" stroke="#5EE7C8" stroke-opacity="0.45"/>
+    <text class="chip" x="161" y="368" text-anchor="middle">Any AI provider</text>
+    <rect x="264" y="342" width="148" height="40" rx="20" fill="#5EE7C8" fill-opacity="0.10" stroke="#5EE7C8" stroke-opacity="0.45"/>
+    <text class="chip" x="338" y="368" text-anchor="middle">Graphs &amp; 3D</text>
+    <rect x="426" y="342" width="196" height="40" rx="20" fill="#5EE7C8" fill-opacity="0.10" stroke="#5EE7C8" stroke-opacity="0.45"/>
+    <text class="chip" x="524" y="368" text-anchor="middle">Private by design</text>
+  </g>
+  <text class="foot" x="72" y="438">Free for Android 11 and newer · bring your own API key</text>
+
+  <ellipse cx="950" cy="262" rx="250" ry="230" fill="url(#glow-phone)"/>
+
+  <!-- Phone -->
+  <g transform="translate(800 40)">
+    <rect x="0" y="0" width="300" height="420" rx="40" fill="#0E1630" stroke="#2B3A63" stroke-width="2"/>
+    <g clip-path="url(#screen)">
+      <rect x="12" y="12" width="276" height="396" fill="#141E3C"/>
+      <circle cx="150" cy="30" r="5" fill="#0B1020"/>
+      <rect x="32" y="54" width="110" height="10" rx="5" fill="#2C3A63"/>
+      <rect x="236" y="52" width="32" height="14" rx="7" fill="#2C3A63"/>
+
+      <g clip-path="url(#photo)">
+        <rect x="32" y="84" width="236" height="124" fill="#1D2A50"/>
+        <circle cx="222" cy="118" r="15" fill="#F7C66B"/>
+        <path d="M32 208 L32 184 L92 132 L136 172 L170 144 L268 208 Z" fill="#2E4C7E"/>
+        <path d="M32 208 L32 168 L70 140 L114 208 Z" fill="#3B62A0"/>
+      </g>
+
+      <rect x="32" y="226" width="200" height="10" rx="5" fill="#2C3A63"/>
+      <rect x="32" y="246" width="160" height="10" rx="5" fill="#2C3A63"/>
+      <rect x="32" y="266" width="214" height="10" rx="5" fill="#2C3A63"/>
+      <rect x="32" y="286" width="120" height="10" rx="5" fill="#2C3A63"/>
+
+      <path class="lasso-fill" d="M70 74 C130 62 222 64 262 80 C286 92 284 160 274 192 C262 220 160 224 96 218 C52 214 24 196 22 156 C20 116 34 84 82 72 Z" fill="#5EE7C8" fill-opacity="0.10"/>
+      <path class="lasso" pathLength="100" d="M70 74 C130 62 222 64 262 80 C286 92 284 160 274 192 C262 220 160 224 96 218 C52 214 24 196 22 156 C20 116 34 84 82 72" fill="none" stroke="#5EE7C8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" filter="url(#soft-glow)"/>
+
+      <g class="sheet">
+        <rect x="12" y="232" width="276" height="190" rx="26" fill="#0B1020" stroke="#2A3A66" stroke-width="1.5"/>
+        <rect x="130" y="244" width="40" height="5" rx="2.5" fill="#3A4A78"/>
+        <path d="M40 262 L43.5 270.5 L52 274 L43.5 277.5 L40 286 L36.5 277.5 L28 274 L36.5 270.5 Z" fill="url(#ink)"/>
+        <rect x="62" y="264" width="150" height="9" rx="4.5" fill="#33426E"/>
+        <rect x="62" y="280" width="108" height="9" rx="4.5" fill="#33426E"/>
+        <rect x="32" y="304" width="236" height="90" rx="14" fill="#121B36" stroke="#22305A"/>
+        <path d="M44 384 H256 M150 312 V390" stroke="#3A4A78" stroke-width="1.5"/>
+        <path d="M60 318 Q150 426 240 318" fill="none" stroke="#5EE7C8" stroke-width="3" stroke-linecap="round"/>
+        <path d="M165 376.5 L225 340.5" stroke="#F7C66B" stroke-width="2.5" stroke-dasharray="5 5" stroke-linecap="round"/>
+        <circle cx="195" cy="358.5" r="5" fill="#F7C66B"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- Floating 3D cube -->
+  <g class="float">
+    <g transform="translate(728 120)">
+      <path d="M0 -30 L26 -15 L0 0 L-26 -15 Z" fill="#5EE7C8" fill-opacity="0.35" stroke="#5EE7C8" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M-26 -15 L0 0 L0 30 L-26 15 Z" fill="#5EE7C8" fill-opacity="0.16" stroke="#5EE7C8" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M26 -15 L0 0 L0 30 L26 15 Z" fill="#9DB8FF" fill-opacity="0.22" stroke="#9DB8FF" stroke-width="2" stroke-linejoin="round"/>
+      <circle cx="0" cy="0" r="3" fill="#F7C66B"/>
+    </g>
+  </g>
+
+  <!-- Floating formula -->
+  <g class="float-late">
+    <rect x="648" y="380" width="160" height="44" rx="22" fill="#0F1832" stroke="#2B3A63" stroke-width="1.5"/>
+    <text class="formula" x="728" y="408" text-anchor="middle">y = x² − 2x</text>
+  </g>
+</svg>

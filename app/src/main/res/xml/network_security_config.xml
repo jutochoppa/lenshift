@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network security policy.
+
+  Lenshift's own gate (see HttpSupport.validateBase) is the real enforcement point: an
+  http:// base URL is refused unless the user explicitly opts in AND the host is loopback
+  or in a private range. The platform must still permit the transport for that opt-in to
+  function at all, so cleartext is allowed here and constrained in code.
+
+  Why not express this purely in XML? Android's <domain> entries cannot wildcard an
+  arbitrary LAN address (192.168.x.x, 10.x.x.x), and pointing Ollama at a desktop on the
+  same network is a first-class use case. The app-level check is therefore stricter and
+  more expressive than the XML could be, and it produces a clear, actionable error.
+
+  Everything not explicitly opted into at the app layer still uses HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Never allow user-installed CAs to silently intercept provider traffic. -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="steps-title steps-desc">
+  <title id="steps-title">Install in four steps</title>
+  <desc id="steps-desc">1. Download the APK. 2. Install it. 3. Set Lenshift as your assistant. 4. Connect your AI with an API key.</desc>
+  <defs>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#141F40"/>
+      <stop offset="1" stop-color="#0B1020"/>
+    </linearGradient>
+    <marker id="head" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M1 1 L8 5 L1 9" fill="none" stroke="#5EE7C8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <style>
+    .num { font: 700 21px 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; fill: #0B1020; }
+    .name { font: 700 24px 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; fill: #FFFFFF; }
+    .hint { font: 400 16px 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; fill: #9AA6C8; }
+    .frame { stroke: #2B3A63; animation: focus 8s ease-in-out infinite; }
+    .s2 { animation-delay: -6s; }
+    .s3 { animation-delay: -4s; }
+    .s4 { animation-delay: -2s; }
+    .flow { stroke-dasharray: 4 6; animation: flow 1.2s linear infinite; }
+    @keyframes focus { 0%, 22% { stroke: #5EE7C8; } 28%, 100% { stroke: #2B3A63; } }
+    @keyframes flow { to { stroke-dashoffset: -20; } }
+    @media (prefers-reduced-motion: reduce) { .frame, .flow { animation: none; } }
+  </style>
+
+  <!-- 1 Download -->
+  <g transform="translate(24 30)">
+    <rect class="frame" x="0" y="0" width="258" height="240" rx="26" fill="url(#card)" stroke-width="2"/>
+    <circle cx="40" cy="40" r="20" fill="#5EE7C8"/>
+    <text class="num" x="40" y="47.5" text-anchor="middle">1</text>
+    <g transform="translate(129 108)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M0 -30 V8 M-13 -5 L0 8 L13 -5" stroke="#5EE7C8" stroke-width="5"/>
+      <path d="M-28 4 V20 H28 V4" stroke="#9DB8FF" stroke-width="5"/>
+    </g>
+    <text class="name" x="129" y="182" text-anchor="middle">Download</text>
+    <text class="hint" x="129" y="210" text-anchor="middle">Tap the button above</text>
+  </g>
+  <path class="flow" d="M288 150 H312" stroke="#5EE7C8" stroke-width="2.5" stroke-linecap="round" marker-end="url(#head)"/>
+
+  <!-- 2 Install -->
+  <g transform="translate(318 30)">
+    <rect class="frame s2" x="0" y="0" width="258" height="240" rx="26" fill="url(#card)" stroke-width="2"/>
+    <circle cx="40" cy="40" r="20" fill="#5EE7C8"/>
+    <text class="num" x="40" y="47.5" text-anchor="middle">2</text>
+    <g transform="translate(129 104)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="-20" y="-36" width="40" height="70" rx="9" stroke="#9DB8FF" stroke-width="5"/>
+      <path d="M-9 -1 L-2 6 L11 -8" stroke="#5EE7C8" stroke-width="5"/>
+    </g>
+    <text class="name" x="129" y="182" text-anchor="middle">Install</text>
+    <text class="hint" x="129" y="210" text-anchor="middle">Allow installs when asked</text>
+  </g>
+  <path class="flow" d="M582 150 H606" stroke="#5EE7C8" stroke-width="2.5" stroke-linecap="round" marker-end="url(#head)"/>
+
+  <!-- 3 Set as assistant -->
+  <g transform="translate(612 30)">
+    <rect class="frame s3" x="0" y="0" width="258" height="240" rx="26" fill="url(#card)" stroke-width="2"/>
+    <circle cx="40" cy="40" r="20" fill="#5EE7C8"/>
+    <text class="num" x="40" y="47.5" text-anchor="middle">3</text>
+    <g transform="translate(96 72) scale(0.62)">
+      <path d="M54,26 A28,28 0 1,1 53.9,26" fill="none" stroke="#5EE7C8" stroke-width="7" stroke-linecap="round"/>
+      <path d="M54,40 L66,54 L58,54 L58,70 L50,70 L50,54 L42,54 Z" fill="#5EE7C8"/>
+    </g>
+    <text class="name" x="129" y="182" text-anchor="middle">Set as assistant</text>
+    <text class="hint" x="129" y="210" text-anchor="middle">One tap in Lenshift</text>
+  </g>
+  <path class="flow" d="M876 150 H900" stroke="#5EE7C8" stroke-width="2.5" stroke-linecap="round" marker-end="url(#head)"/>
+
+  <!-- 4 Connect your AI -->
+  <g transform="translate(906 30)">
+    <rect class="frame s4" x="0" y="0" width="258" height="240" rx="26" fill="url(#card)" stroke-width="2"/>
+    <circle cx="40" cy="40" r="20" fill="#5EE7C8"/>
+    <text class="num" x="40" y="47.5" text-anchor="middle">4</text>
+    <g transform="translate(129 106)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="-16" cy="0" r="13" stroke="#F7C66B" stroke-width="5"/>
+      <path d="M-3 0 H30 M22 0 V11 M13 0 V8" stroke="#F7C66B" stroke-width="5"/>
+    </g>
+    <text class="name" x="129" y="182" text-anchor="middle">Connect your AI</text>
+    <text class="hint" x="129" y="210" text-anchor="middle">Paste a key, pick a model</text>
+  </g>
+</svg>

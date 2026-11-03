@@ -1,0 +1,34 @@
+# Build outputs
+*.iml
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.apks
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Local scratch space and tool caches
+work/
+.gradle-home/
+__pycache__/
+*.pyc
+
+# Secrets
+*.jks
+*.keystore
+*.p12
+KEYSTORE_INFO.txt
+secrets.properties
+apikeys.properties
+
+# Logs
+*.log

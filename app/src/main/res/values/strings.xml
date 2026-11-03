@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lenshift</string>
+    <string name="assist_service_label">Lenshift</string>
+    <string name="tile_label">Lenshift</string>
+    <string name="accessibility_service_label">Lenshift screenshot fallback</string>
+    <string name="accessibility_service_description">Lets Lenshift take a single screenshot when you tap the accessibility shortcut. Lenshift does not read screen text, watch your activity, or control other apps. Only enable this if assistant screenshots are unavailable on your device.</string>
+</resources>

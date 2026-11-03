@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="Chats you can continue">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16214A"/>
+      <stop offset="1" stop-color="#0B1020"/>
+    </linearGradient>
+  </defs>
+  <style>
+    .dot { animation: blink 1.6s ease-in-out infinite; }
+    .d2 { animation-delay: 0.2s; }
+    .d3 { animation-delay: 0.4s; }
+    @keyframes blink { 0%, 100% { opacity: 0.35; } 40% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+  </style>
+  <rect x="2" y="2" width="116" height="116" rx="30" fill="url(#tile)" stroke="#2B3A63" stroke-width="2"/>
+  <path d="M26 30 H72 A8 8 0 0 1 80 38 V58 A8 8 0 0 1 72 66 H42 L32 75 V66 H26 A8 8 0 0 1 18 58 V38 A8 8 0 0 1 26 30 Z" fill="#2C3A63"/>
+  <rect x="28" y="42" width="38" height="6" rx="3" fill="#5D6E9E"/>
+  <rect x="28" y="53" width="26" height="6" rx="3" fill="#5D6E9E"/>
+  <path d="M50 56 H94 A8 8 0 0 1 102 64 V84 A8 8 0 0 1 94 92 H88 V101 L78 92 H50 A8 8 0 0 1 42 84 V64 A8 8 0 0 1 50 56 Z" fill="#0B1020" stroke="#5EE7C8" stroke-width="4" stroke-linejoin="round"/>
+  <circle class="dot" cx="60" cy="74" r="4" fill="#5EE7C8"/>
+  <circle class="dot d2" cx="72" cy="74" r="4" fill="#5EE7C8"/>
+  <circle class="dot d3" cx="84" cy="74" r="4" fill="#5EE7C8"/>
+</svg>

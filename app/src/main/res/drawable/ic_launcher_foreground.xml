@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original Lenshift mark: an open ring (lens) broken by an upward shift arrow. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#0B1020"
+        android:pathData="M0,0h108v108h-108z" />
+    <path
+        android:strokeColor="#5EE7C8"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:pathData="M54,26 A28,28 0 1,1 53.9,26" />
+    <path
+        android:fillColor="#5EE7C8"
+        android:pathData="M54,40 L66,54 L58,54 L58,70 L50,70 L50,54 L42,54 Z" />
+</vector>

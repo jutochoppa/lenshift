@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declares Lenshift as a digital-assistant candidate.
+
+  Two constraints were established empirically on an Android 14 emulator, and they shape
+  this file:
+
+  1. `recognitionService` is MANDATORY.
+     VoiceInteractionManagerService refuses to activate an assistant whose metadata omits
+     it, logging "The RecognitionService must be set to avoid boot loop on user switch".
+     Lenshift therefore declares an inert RecognitionService that rejects every request;
+     see LenshiftRecognitionService for the full rationale. No microphone is ever opened.
+
+  2. `usesAssistData` / `usesAssistScreenshots` / `usesAssistStructureScreenContent` are
+     NOT public SDK attributes.
+     Dumping framework-res.apk from the device shows only supportsAssist,
+     supportsLaunchVoiceAssistFromKeyguard, supportsLocalInteraction and
+     hotwordDetectionService, and aapt2 against compileSdk 36 rejects the other three.
+     Google's own APK declares them because it builds against a non-public SDK.
+
+     Consequence: whether a screenshot reaches onHandleScreenshot() is decided by
+     SystemUI via the SHOW_WITH_SCREENSHOT flag, not by anything declared here. Lenshift
+     treats a missing screenshot as an expected outcome and falls back — see
+     CaptureCoordinator and docs/research.md for the measurements.
+
+  Deliberately absent:
+    * hotwordDetectionService - no always-on microphone, no keyphrase model.
+-->
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="dev.lenshift.app.assist.LenshiftVoiceInteractionSessionService"
+    android:recognitionService="dev.lenshift.app.assist.LenshiftRecognitionService"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="false"
+    android:supportsLocalInteraction="true" />

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="Any AI provider">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16214A"/>
+      <stop offset="1" stop-color="#0B1020"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="116" height="116" rx="30" fill="url(#tile)" stroke="#2B3A63" stroke-width="2"/>
+  <path d="M60 60 L32 34 M60 60 L88 34 M60 60 L32 86 M60 60 L88 86" stroke="#3A4A78" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="32" cy="34" r="9" fill="#9DB8FF"/>
+  <circle cx="88" cy="34" r="9" fill="#F7C66B"/>
+  <circle cx="32" cy="86" r="9" fill="#F49AC1"/>
+  <circle cx="88" cy="86" r="9" fill="#5EE7C8" fill-opacity="0.75"/>
+  <circle cx="60" cy="60" r="15" fill="#0B1020" stroke="#5EE7C8" stroke-width="4"/>
+  <path d="M60 52 L66 59 L62.5 59 L62.5 67 L57.5 67 L57.5 59 L54 59 Z" fill="#5EE7C8"/>
+</svg>

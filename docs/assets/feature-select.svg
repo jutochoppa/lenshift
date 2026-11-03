@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="Circle to select">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16214A"/>
+      <stop offset="1" stop-color="#0B1020"/>
+    </linearGradient>
+  </defs>
+  <style>
+    .loop { stroke-dasharray: 100; animation: draw 5s ease-in-out infinite both; }
+    @keyframes draw { 0%, 8% { stroke-dashoffset: 100; } 45%, 100% { stroke-dashoffset: 0; } }
+    @media (prefers-reduced-motion: reduce) { .loop { animation: none; } }
+  </style>
+  <rect x="2" y="2" width="116" height="116" rx="30" fill="url(#tile)" stroke="#2B3A63" stroke-width="2"/>
+  <rect x="28" y="34" width="64" height="9" rx="4.5" fill="#33426E"/>
+  <rect x="38" y="55" width="44" height="10" rx="5" fill="#5EE7C8"/>
+  <rect x="28" y="77" width="56" height="9" rx="4.5" fill="#33426E"/>
+  <path class="loop" pathLength="100" d="M40 47 C56 41 84 43 92 53 C98 63 84 73 60 73 C38 73 24 66 26 57 C28 49 40 45 52 45" fill="none" stroke="#5EE7C8" stroke-width="4" stroke-linecap="round"/>
+</svg>
