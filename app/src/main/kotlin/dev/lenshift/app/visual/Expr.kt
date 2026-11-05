@@ -47,7 +47,8 @@ class Expr private constructor(private val root: Node, val source: String, val u
         /**
          * Parses [text], allowing [variables] besides constants and built-in functions, and
          * calls to the spec's own one-variable [functions] (`f(x)`, and `f'(x)` for the
-         * derivative). Variable names may be dotted, like the point coordinate `A.x`.
+         * derivative). Variable names may be dotted, like the point coordinate `A.x`. When a
+         * name appears twice, the first wins: a curve's own `t` shadows a slider named t.
          * @throws ExprError with a message fit to show the user.
          */
         fun parse(
@@ -58,9 +59,10 @@ class Expr private constructor(private val root: Node, val source: String, val u
             if (text.length > MAX_LENGTH) throw ExprError("Expression is too long")
             val normalised = normalise(text)
             if (normalised.isBlank()) throw ExprError("Empty expression")
-            val slots = variables.withIndex().associate { (i, name) -> name to i }
+            val slots = HashMap<String, Int>()
+            variables.forEachIndexed { i, name -> slots.putIfAbsent(name, i) }
             val tokens = Tokenizer(normalised, slots.keys, functions.keys).tokens()
-            val parser = Parser(tokens, slots, functions)
+            val parser = Parser(tokens, slots, variables.size, functions)
             val root = parser.parseAll()
             return Expr(root, text.trim(), parser.usedVariable)
         }
@@ -68,17 +70,20 @@ class Expr private constructor(private val root: Node, val source: String, val u
         /** Evaluates a constant such as `2pi` or `sqrt(2)/2`. */
         fun constant(text: String): Double = parse(text).eval(DoubleArray(0))
 
-        /** True for names of constants and functions, which variables may not reuse. */
-        fun isReserved(name: String): Boolean = name in CONSTANTS || name in FUNCTIONS || name == "frac"
+        /** True for names of constants, functions and words, which variables may not reuse. */
+        fun isReserved(name: String): Boolean =
+            name in CONSTANTS || name in FUNCTIONS || name == "frac" || name.lowercase() in LOGIC_WORDS
 
         /**
          * Rewrites Unicode and LaTeX notation models often use into plain syntax:
-         * `−` `×` `·` `÷` `²` `³` `π` `θ` `√`, `\frac{a}{b}`, `\sin`, `\cdot`, braces.
+         * `−` `×` `·` `÷` `²` `³` `π` `θ` `√` `≤` `≥` `≠` `∧` `∨` `¬`, `\frac{a}{b}`, `\sin`,
+         * `\cdot`, `\le`, `\land`, braces.
          */
         internal fun normalise(text: String): String {
             var s = text.trim()
             s = s.replace("\\left", "").replace("\\right", "")
                 .replace("\\cdot", "*").replace("\\times", "*").replace("\\div", "/")
+            for ((command, plain) in LATEX_WORDS) s = command.replace(s, plain)
             s = s.replace(Regex("""\\(?=[A-Za-z])"""), "")
             val out = StringBuilder(s.length + 8)
             for (ch in s) {
@@ -92,6 +97,12 @@ class Expr private constructor(private val root: Node, val source: String, val u
                     'θ' -> out.append(" theta ")
                     'τ' -> out.append(" tau ")
                     '√' -> out.append(" sqrt ")
+                    '≤' -> out.append("<=")
+                    '≥' -> out.append(">=")
+                    '≠' -> out.append("!=")
+                    '∧' -> out.append(" and ")
+                    '∨' -> out.append(" or ")
+                    '¬' -> out.append(" not ")
                     '{' -> out.append('(')
                     '}' -> out.append(')')
                     else -> out.append(ch)
@@ -99,6 +110,18 @@ class Expr private constructor(private val root: Node, val source: String, val u
             }
             return out.toString().replace("**", "^")
         }
+
+        /** Words that join or negate conditions: `y > x^2 and y < 2`. */
+        internal val LOGIC_WORDS = setOf("and", "or", "not")
+
+        private val LATEX_WORDS: List<Pair<Regex, String>> = listOf(
+            Regex("""\\(?:leqslant|leq|le)(?![A-Za-z])""") to "<=",
+            Regex("""\\(?:geqslant|geq|ge)(?![A-Za-z])""") to ">=",
+            Regex("""\\(?:neq|ne)(?![A-Za-z])""") to "!=",
+            Regex("""\\(?:land|wedge)(?![A-Za-z])""") to " and ",
+            Regex("""\\(?:lor|vee)(?![A-Za-z])""") to " or ",
+            Regex("""\\(?:lnot|neg)(?![A-Za-z])""") to " not "
+        )
     }
 }
 
@@ -161,7 +184,9 @@ private class Tokenizer(
                         out += Token.Name(dotted)
                         i += 2
                     } else {
-                        out += names(text.substring(start, i))
+                        val word = text.substring(start, i)
+                        val lower = word.lowercase()
+                        if (lower in Expr.LOGIC_WORDS) out += Token.Op(lower) else out += names(word)
                     }
                 }
                 else -> {
@@ -208,7 +233,7 @@ private class Tokenizer(
     }
 
     companion object {
-        val TWO_CHAR = setOf("<=", ">=", "==", "!=")
+        val TWO_CHAR = setOf("<=", ">=", "==", "!=", "&&")
         val SINGLE = setOf('+', '-', '*', '/', '^', '(', ')', ',', '<', '>', '|', '!', '\'')
     }
 }
@@ -218,6 +243,8 @@ private class Tokenizer(
 private class Parser(
     private val tokens: List<Token>,
     private val slots: Map<String, Int>,
+    /** How many values the expression is evaluated with (duplicate names included). */
+    private val valueCount: Int,
     private val userFunctions: Map<String, UserFunction>
 ) {
     private var pos = 0
@@ -227,7 +254,7 @@ private class Parser(
         private set
 
     fun parseAll(): Node {
-        val node = comparison()
+        val node = logicOr()
         if (pos < tokens.size) throw ExprError("Unexpected ${describe(tokens[pos])}")
         return node
     }
@@ -246,14 +273,47 @@ private class Parser(
         return node
     }
 
-    private fun comparison(): Node {
-        val left = additive()
-        val op = (peek() as? Token.Op)?.op
-        if (op == "<" || op == ">" || op == "<=" || op == ">=" || op == "==" || op == "!=") {
+    private fun logicOr(): Node {
+        var node = logicAnd()
+        while (isOp("or")) {
             pos++
-            return count(Node.Compare(op, left, additive()))
+            node = count(Node.Or(node, logicAnd()))
         }
-        return left
+        return node
+    }
+
+    private fun logicAnd(): Node {
+        var node = logicNot()
+        while (isOp("and") || isOp("&&")) {
+            pos++
+            node = count(Node.And(node, logicNot()))
+        }
+        return node
+    }
+
+    /** `not` or a leading `!`; after an operand `!` is a factorial instead. */
+    private fun logicNot(): Node {
+        if (isOp("not") || isOp("!")) {
+            pos++
+            return count(Node.Not(logicNot()))
+        }
+        return comparison()
+    }
+
+    /** One comparison, or a chain such as `0 <= y <= 1`, which holds when every link does. */
+    private fun comparison(): Node {
+        var left = additive()
+        var chain: Node? = null
+        while (true) {
+            val op = (peek() as? Token.Op)?.op
+            if (op == null || op !in COMPARISONS) break
+            pos++
+            val right = additive()
+            val link = count(Node.Compare(op, left, right))
+            chain = if (chain == null) link else count(Node.And(chain, link))
+            left = right
+        }
+        return chain ?: left
     }
 
     private fun additive(): Node {
@@ -314,7 +374,7 @@ private class Parser(
             return when (val t = next()) {
                 is Token.Num -> count(Node.Const(t.value))
                 is Token.Op -> when (t.op) {
-                    "(" -> comparison().also { expect(")") }
+                    "(" -> logicOr().also { expect(")") }
                     "|" -> count(Node.Call1(::abs, additive())).also { expect("|") }
                     else -> throw ExprError("Unexpected '${t.op}'")
                 }
@@ -331,10 +391,10 @@ private class Parser(
         if (name == "frac") {
             // \frac{a}{b}, after braces became parentheses: frac(a)(b).
             expect("(")
-            val top = comparison()
+            val top = logicOr()
             expect(")")
             expect("(")
-            val bottom = comparison()
+            val bottom = logicOr()
             expect(")")
             return count(Node.Div(top, bottom))
         }
@@ -344,10 +404,10 @@ private class Parser(
             pos++
             buildList {
                 if (!isOp(")")) {
-                    add(comparison())
+                    add(logicOr())
                     while (isOp(",")) {
                         pos++
-                        add(comparison())
+                        add(logicOr())
                     }
                 }
                 expect(")")
@@ -367,11 +427,11 @@ private class Parser(
     private fun userCall(name: String, fn: UserFunction): Node {
         val derivative = isOp("'")
         if (derivative) pos++
-        val callerArity = slots.size - fn.sharedCount
+        val callerArity = valueCount - fn.sharedCount
         if (callerArity < 0) throw ExprError("$name can't be used here")
         val arg = if (isOp("(")) {
             pos++
-            comparison().also { expect(")") }
+            logicOr().also { expect(")") }
         } else {
             power()
         }
@@ -388,6 +448,7 @@ private class Parser(
     companion object {
         const val MAX_DEPTH = 60
         const val MAX_NODES = 4_000
+        val COMPARISONS = setOf("<", ">", "<=", ">=", "==", "!=")
     }
 }
 
@@ -453,6 +514,19 @@ private sealed class Node {
             }
             return if (result) 1.0 else 0.0
         }
+    }
+
+    // Conditions are 1 or 0. Any other number counts as true unless it is 0 or undefined.
+    class And(private val a: Node, private val b: Node) : Node() {
+        override fun eval(v: DoubleArray) = if (truth(a.eval(v)) && truth(b.eval(v))) 1.0 else 0.0
+    }
+
+    class Or(private val a: Node, private val b: Node) : Node() {
+        override fun eval(v: DoubleArray) = if (truth(a.eval(v)) || truth(b.eval(v))) 1.0 else 0.0
+    }
+
+    class Not(private val a: Node) : Node() {
+        override fun eval(v: DoubleArray) = if (truth(a.eval(v))) 0.0 else 1.0
     }
 
     class If(private val c: Node, private val a: Node, private val b: Node) : Node() {
@@ -543,6 +617,8 @@ private val FUNCTIONS: Map<String, Fn> = buildMap {
     put("hypot", f2(::hypot))
     put("if", Fn(3, 3) { Node.If(it[0], it[1], it[2]) })
 }
+
+private fun truth(x: Double) = x != 0.0 && !x.isNaN()
 
 /** n! for whole numbers up to 170 (beyond that the result overflows a double). */
 private fun factorial(n: Double): Double {

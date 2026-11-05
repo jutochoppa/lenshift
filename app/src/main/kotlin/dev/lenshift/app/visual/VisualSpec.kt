@@ -137,7 +137,8 @@ sealed interface LineRef
 data class NamedLine(val name: String) : LineRef
 data class TwoPoints(val a: Point2, val b: Point2) : LineRef
 
-enum class Relation { EQ, LT, LE, GT, GE }
+/** How an implicit item compares f(x, y) with 0; [HOLDS] shades where a whole condition is true. */
+enum class Relation { EQ, LT, LE, GT, GE, HOLDS }
 enum class LineKind { SEGMENT, LINE, RAY }
 enum class RiemannType { LEFT, RIGHT, MIDPOINT, TRAPEZOID }
 enum class MarkKind { ROOTS, EXTREMA, INTERSECTIONS }
@@ -270,17 +271,27 @@ object VisualSpec {
         "box", "cube", "cylinder", "cone", "polyhedron", "polygon", "circle", "intersection", "text"
     )
 
-    /** Names the axes and curve parameters use, so sliders and items cannot shadow them. */
-    private val RESERVED = setOf("x", "y", "z", "t", "u", "v", "theta", "r")
+    /** The axes: no slider or item may take these names. */
+    private val AXES = setOf("x", "y", "z")
+    /**
+     * Curve parameters. A slider may use them (inside a curve its own parameter wins), but
+     * an item may not: its name would read as the parameter.
+     */
+    private val PARAMETERS = setOf("t", "u", "v", "theta", "r")
     private val NAME = Regex("^[A-Za-z][A-Za-z0-9_]{0,15}$")
+
+    /** Names models give unnamed curves when they refer to them: f, g, h in order. */
+    private val FUNCTION_NAMES = listOf("f", "g", "h")
+
+    /** Words and symbols that join conditions: "y > x^2 and y < 2". */
+    private val LOGIC = Regex("""(?i)(?<![A-Za-z])(?:and|or|not)(?![A-Za-z])|&&|[∧∨¬]|\\(?:land|lor|lnot|wedge|vee|neg)(?![A-Za-z])""")
 
     private enum class Kind { POINT, LINE, CIRCLE, FUNCTION, PLANE, SPHERE }
 
     fun parse(source: String, threeD: Boolean): Visual {
+        val cleaned = cleanJson(source)
         val json = try {
-            JSONObject(cleanJson(source))
-        } catch (e: SpecError) {
-            throw e
+            JSONObject(cleaned)
         } catch (e: Exception) {
             throw SpecError("The spec is not valid JSON")
         }
@@ -303,13 +314,17 @@ object VisualSpec {
             val name = obj.optString("name").trim().takeIf { it.isNotEmpty() && it != "null" } ?: return@forEachIndexed
             val kind = nameKind(obj, threeD) ?: return@forEachIndexed
             when {
-                !NAME.matches(name) || name in RESERVED || Expr.isReserved(name) ->
-                    notes += "Item ${i + 1}: '$name' can't be used as a name."
+                // Names like O' or r are meant as labels: draw the item with it as its label.
+                !NAME.matches(name) || name in AXES || name in PARAMETERS || Expr.isReserved(name) -> {
+                    obj.remove("name")
+                    if (!obj.has("label")) obj.put("label", name)
+                }
                 name in kinds || params.any { it.name == name } ->
                     notes += "Item ${i + 1}: the name '$name' is used twice."
                 else -> kinds[name] = kind
             }
         }
+        autoName(items, kinds, params, cleaned, threeD)
         val axes = if (threeD) listOf("x", "y", "z") else listOf("x", "y")
         val shared = params.map { it.name } + kinds.filterValues { it == Kind.POINT }.keys.flatMap { n -> axes.map { "$n.$it" } }
         val ctx = Ctx(shared, kinds, notes)
@@ -347,6 +362,36 @@ object VisualSpec {
                 piY = (ticks as? JSONObject)?.optString("y") == "pi",
                 items = parsed
             )
+        }
+    }
+
+    /**
+     * Models often draw a curve or circle without a name and then refer to it as f (g, h for
+     * later curves) or c1 (c2, …). Such an item gets that name, but only when the spec
+     * mentions it and nothing else has it, so a spec that never says "f" is untouched.
+     */
+    private fun autoName(items: List<Any?>, kinds: MutableMap<String, Kind>, params: List<Param>, source: String, threeD: Boolean) {
+        fun free(name: String) = name !in kinds && params.none { it.name == name }
+        fun mentioned(name: String) = Regex("""(?<![A-Za-z0-9_.\\])${Regex.escape(name)}(?![A-Za-z0-9_])""").containsMatchIn(source)
+        val functionNames = FUNCTION_NAMES.filter(::free).iterator()
+        var circles = 0
+        for (raw in items) {
+            val obj = raw as? JSONObject ?: continue
+            if (obj.optString("name").trim().let { it.isNotEmpty() && it != "null" }) continue
+            val name = when (nameKind(obj, threeD)) {
+                Kind.FUNCTION -> {
+                    val curve = obj.opt("fn") ?: obj.opt("function") ?: obj.opt("y")
+                    // x = g(y) is not a function of x, so it cannot be called f.
+                    if (curve is String && Regex("""^\s*x\s*=""").containsMatchIn(curve)) continue
+                    if (functionNames.hasNext()) functionNames.next() else continue
+                }
+                Kind.CIRCLE -> "c${++circles}"
+                else -> continue
+            }
+            if (free(name) && mentioned(name)) {
+                obj.put("name", name)
+                kinds[name] = nameKind(obj, threeD) ?: continue
+            }
         }
     }
 
@@ -394,7 +439,7 @@ object VisualSpec {
                 notes += "Only $MAX_PARAMS sliders are shown."
                 break
             }
-            if (!NAME.matches(name) || name in RESERVED || Expr.isReserved(name)) {
+            if (!NAME.matches(name) || name in AXES || Expr.isReserved(name)) {
                 notes += "Slider '$name' needs a different name."
                 continue
             }
@@ -432,6 +477,9 @@ object VisualSpec {
         /** Named functions defined so far; later expressions may call them. */
         private val functions = linkedMapOf<String, UserFunction>()
         private val functionFormulas = mutableMapOf<String, Formula>()
+        /** Named curves written x = g(y); those with a constant g are vertical lines. */
+        private val sideways = mutableSetOf<String>()
+        private val verticals = mutableMapOf<String, Num>()
 
         fun item2(o: JSONObject): Item2? {
             val kind = KINDS_2D.firstOrNull { o.has(it) } ?: return null
@@ -447,6 +495,10 @@ object VisualSpec {
                     if (name != null && !inverse) {
                         functions[name] = UserFunction(f.expr, shared.size)
                         functionFormulas[name] = f
+                    }
+                    if (name != null && inverse) {
+                        sideways += name
+                        runCatching { num(body) }.getOrNull()?.let { verticals[name] = it }
                     }
                     FnItem(name, f, span(o.opt("domain") ?: o.opt("x")), inverse, style)
                 }
@@ -596,7 +648,17 @@ object VisualSpec {
                 "intersections" -> {
                     val pair = v as? JSONArray ?: throw SpecError("intersections takes two functions")
                     if (pair.length() != 2) throw SpecError("intersections takes two functions")
-                    MarkItem(MarkKind.INTERSECTIONS, fn(pair.opt(0)), fn(pair.opt(1)), o.optBoolean("showCoordinates", true), style)
+                    val a = pair.opt(0)
+                    val b = pair.opt(1)
+                    // A vertical line x = c meets y = f(x) once, at (c, f(c)).
+                    val lineA = (a as? String)?.trim()?.let { verticals[it] }
+                    val lineB = (b as? String)?.trim()?.let { verticals[it] }
+                    val marked = style.copy(label = style.label ?: o.optString("name").trim().takeIf { it.isNotEmpty() && it != "null" })
+                    when {
+                        lineA != null && lineB == null -> PointItem(null, OnGraph(fn(b), lineA), false, marked)
+                        lineB != null && lineA == null -> PointItem(null, OnGraph(fn(a), lineB), false, marked)
+                        else -> MarkItem(MarkKind.INTERSECTIONS, fn(a), fn(b), o.optBoolean("showCoordinates", true), style)
+                    }
                 }
                 "slopefield" -> FieldItem(formula(string(v).replace(Regex("""^\s*(dy/dx|y')\s*=\s*"""), ""), listOf("x", "y")), null, null, style)
                 "vectorfield" -> {
@@ -794,10 +856,14 @@ object VisualSpec {
         fun formula(text: String, vars: List<String>): Formula =
             Formula(Expr.parse(text, vars + shared, functions), vars.size)
 
-        /** A named function, or an expression in x. */
+        /** A named function, an expression in x, or either wrapped as {"fn": …}. */
         fun fn(raw: Any?): Formula {
+            if (raw is JSONObject) {
+                return fn(raw.opt("fn") ?: raw.opt("function") ?: raw.opt("y") ?: throw SpecError("expected a function"))
+            }
             val text = string(raw)
             functionFormulas[text]?.let { return it }
+            if (text in sideways) throw SpecError("'$text' is a curve x = …, not a function of x")
             if (kinds[text] == Kind.FUNCTION) throw SpecError("'$text' must be defined before it is used")
             return formula(text.replace(Regex("""^\s*y\s*=\s*"""), ""), listOf("x"))
         }
@@ -849,6 +915,9 @@ object VisualSpec {
                     }
                 }
                 raw.has("x") -> AtXY(num(raw.opt("x")), num(raw.opt("y")))
+                // A point item written in place of a point: {"point": [1, 2]}.
+                raw.has("point") -> point(raw.opt("point"))
+                raw.has("at") -> point(raw.opt("at"))
                 else -> throw SpecError("a point is [x, y], a name, or {midpoint | intersection | on}")
             }
             else -> throw SpecError("a point is [x, y]")
@@ -914,6 +983,10 @@ object VisualSpec {
             }
             is JSONObject -> when {
                 raw.has("midpoint") -> twoPoints3(raw.opt("midpoint")).let { (a, b) -> Midpoint3(a, b) }
+                // A point item written in place of a point: {"point": [1, 2, 3]}.
+                raw.has("point") -> point3(raw.opt("point"))
+                raw.has("at") -> point3(raw.opt("at"))
+                raw.has("x") -> AtXYZ(num(raw.opt("x")), num(raw.opt("y")), num(raw.opt("z")))
                 else -> throw SpecError("a point is [x, y, z], a name, or {midpoint}")
             }
             else -> throw SpecError("a point is [x, y, z]")
@@ -998,8 +1071,13 @@ object VisualSpec {
             return (0 until count).map { string(arr.opt(it)) }
         }
 
-        /** Splits "x^2 + y^2 <= 4" into "(x^2 + y^2)-(4)" and the relation. */
+        /**
+         * Splits "x^2 + y^2 <= 4" into "(x^2 + y^2)-(4)" and the relation. A condition
+         * joined with and/or, or a chain such as "0 <= y <= 1", stays whole: it shades
+         * where it holds.
+         */
         private fun relation(text: String): Pair<String, Relation> {
+            if (LOGIC.containsMatchIn(text) || topLevelComparisons(text) > 1) return text to Relation.HOLDS
             var depth = 0
             var i = 0
             while (i < text.length) {
@@ -1026,6 +1104,30 @@ object VisualSpec {
                 i++
             }
             return text to Relation.EQ
+        }
+
+        /** Comparison operators outside brackets; "<=" and "!=" count once. */
+        private fun topLevelComparisons(text: String): Int {
+            var depth = 0
+            var count = 0
+            var i = 0
+            while (i < text.length) {
+                when (text[i]) {
+                    '(', '{', '[' -> depth++
+                    ')', '}', ']' -> depth--
+                    '<', '>', '=', '≤', '≥', '≠' -> if (depth == 0) {
+                        count++
+                        // Skip the second character of <=, >=, ==.
+                        if (text.getOrNull(i + 1) == '=') i++
+                    }
+                    '!' -> if (depth == 0 && text.getOrNull(i + 1) == '=') {
+                        count++
+                        i++
+                    }
+                }
+                i++
+            }
+            return count
         }
 
         private fun style(o: JSONObject): Style {
@@ -1097,7 +1199,9 @@ object VisualSpec {
      * Turns what models write into strict JSON: the outermost `{…}`, without comments or
      * trailing commas, with single-quoted strings and bare keys quoted, and with LaTeX
      * commands inside strings (`"\theta"`, `"\frac"`) kept literal instead of becoming
-     * JSON escapes such as a tab.
+     * JSON escapes such as a tab. Misplaced brackets are repaired: a key written inside a
+     * list (`[[0, 0], [1, 1], "label": "x"]`) closes the list first, a stray `]` inside an
+     * object is dropped, and lists or objects left open are closed.
      */
     internal fun cleanJson(source: String): String {
         val start = source.indexOf('{')
@@ -1112,7 +1216,15 @@ object VisualSpec {
             val c = s[i]
             when {
                 c == '"' || c == '\'' -> {
+                    val at = out.length
                     i = copyString(s, i, out)
+                    if (stack.lastOrNull() == '[' && nextNonSpace(s, i) == ':') {
+                        // A key inside a list: close the list before the comma that precedes it.
+                        var p = at
+                        while (p > 0 && out[p - 1].isWhitespace()) p--
+                        out.insert(if (p > 0 && out[p - 1] == ',') p - 1 else at, ']')
+                        stack.removeLast()
+                    }
                     expectKey = false
                     continue
                 }
@@ -1130,7 +1242,17 @@ object VisualSpec {
                     expectKey = c == '{'
                     out.append(c)
                 }
+                c == ']' && stack.lastOrNull() == '{' -> {
+                    // A stray list close inside an object.
+                    i++
+                    continue
+                }
                 c == '}' || c == ']' -> {
+                    // Lists still open when their object closes.
+                    if (c == '}') while (stack.lastOrNull() == '[') {
+                        out.append(']')
+                        stack.removeLast()
+                    }
                     if (stack.isNotEmpty()) stack.removeLast()
                     expectKey = false
                     out.append(c)
@@ -1162,7 +1284,15 @@ object VisualSpec {
             }
             i++
         }
+        // Whatever is still open, as at the end of a spec cut short.
+        while (stack.isNotEmpty()) out.append(if (stack.removeLast() == '{') '}' else ']')
         return out.toString()
+    }
+
+    private fun nextNonSpace(s: String, from: Int): Char? {
+        var j = from
+        while (j < s.length && s[j].isWhitespace()) j++
+        return s.getOrNull(j)
     }
 
     /** Copies the string literal starting at [start] as a double-quoted JSON string. */

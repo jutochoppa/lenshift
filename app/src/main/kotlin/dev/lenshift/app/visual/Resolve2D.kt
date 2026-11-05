@@ -193,7 +193,9 @@ object Resolve2D {
                         masks += GMask(view, nx, ny, Plot2D.region(f, item.relation, view, nx, ny), fill(style, c, 0.28)!!)
                     }
                     val strict = item.relation == Relation.LT || item.relation == Relation.GT
-                    val segments = Plot2D.contour(f, view, nx, ny)
+                    // A combined condition is 1 or 0, with no boundary curve of its own: its
+                    // shading shows the region, and its curves are usually items too.
+                    val segments = if (item.relation == Relation.HOLDS) DoubleArray(0) else Plot2D.contour(f, view, nx, ny)
                     if (segments.isNotEmpty()) {
                         paths += GPath(segments, c, width(style, 2.5f), if (strict) Dash.DASHED else style.dash, segments = true, bounded = false)
                     }

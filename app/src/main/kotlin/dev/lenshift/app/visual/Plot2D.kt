@@ -217,7 +217,7 @@ object Plot2D {
 
     /**
      * Cells (row-major, row 0 at the bottom) of an [nx]×[ny] grid whose centre satisfies
-     * f(x, y) [relation] 0.
+     * f(x, y) [relation] 0, or, for [Relation.HOLDS], where the condition f is true.
      */
     fun region(f: (Double, Double) -> Double, relation: Relation, view: View2, nx: Int, ny: Int): BooleanArray {
         val dx = view.width / nx
@@ -231,6 +231,7 @@ object Plot2D {
                 Relation.LE -> v <= 0
                 Relation.GT -> v > 0
                 Relation.GE -> v >= 0
+                Relation.HOLDS -> v != 0.0
                 Relation.EQ -> false
             }
         }

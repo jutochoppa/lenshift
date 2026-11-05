@@ -103,4 +103,44 @@ class ExprTest {
         near(3.0, eval("A.x + A.y", "A.x" to 1.0, "A.y" to 2.0))
         assertThrows(ExprError::class.java) { Expr.parse("B.x", listOf("A.x")) }
     }
+
+    @Test
+    fun `conditions join with and, or and not`() {
+        val band = "y > x^2 and y < x + 2"
+        near(1.0, eval(band, "x" to 0.0, "y" to 1.0))
+        near(0.0, eval(band, "x" to 0.0, "y" to 3.0))
+        near(1.0, eval("x < -1 or x > 1", "x" to 2.0))
+        near(0.0, eval("x < -1 or x > 1", "x" to 0.0))
+        near(1.0, eval("not (x > 1)", "x" to 0.0))
+        near(1.0, eval("x > 0 && x < 1", "x" to 0.5))
+        // and binds tighter than or: x > 0 or (x > 5 and x < 1).
+        near(1.0, eval("x > 0 or x > 5 and x < 1", "x" to 3.0))
+        near(2.0, eval("if(x > 0 and x < 1, 2, 3)", "x" to 0.5))
+    }
+
+    @Test
+    fun `a chain of comparisons holds when every link does`() {
+        near(1.0, eval("0 <= y <= 1", "y" to 0.5))
+        near(0.0, eval("0 <= y <= 1", "y" to 2.0))
+        near(0.0, eval("-1 < x < 0 < 2", "x" to 1.0))
+    }
+
+    @Test
+    fun `relation symbols are read from unicode and latex`() {
+        near(1.0, eval("x ≤ 1 ∧ x ≥ 0", "x" to 0.5))
+        near(1.0, eval("x \\le 1 \\land x \\geq 0", "x" to 0.5))
+        near(1.0, eval("x \\neq 2", "x" to 1.0))
+        near(1.0, eval("\\lnot (x > 1) \\lor x < 0", "x" to 0.0))
+    }
+
+    @Test
+    fun `the first of two equal names wins`() {
+        // A curve's own t comes first, so it shadows a slider named t at the end.
+        val e = Expr.parse("t", listOf("t", "a", "t"))
+        near(2.0, e.eval(doubleArrayOf(2.0, 0.0, 9.0)))
+        // Calls still read their shared values from the end of all the values.
+        val h = UserFunction(Expr.parse("t*x", listOf("x", "t")), 1)
+        val call = Expr.parse("h(t)", listOf("t", "t"), mapOf("h" to h))
+        near(6.0, call.eval(doubleArrayOf(2.0, 3.0)))
+    }
 }

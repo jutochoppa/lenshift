@@ -93,13 +93,95 @@ class VisualSpecTest {
     }
 
     @Test
-    fun `names must be defined before use and not clash`() {
+    fun `names must be defined before use, and unusable names become labels`() {
         val g = graph("""{"items": [{"tangent": {"fn": "f", "at": 1}}, {"fn": "x^2", "name": "f"}, {"point": [0,0], "name": "sin"}]}""")
-        // The tangent is dropped; the point is kept without its unusable name.
+        // The tangent is dropped; the point is drawn, its unusable name shown as its label.
         assertEquals(2, g.items.size)
-        assertNull((g.items[1] as PointItem).name)
+        val point = g.items[1] as PointItem
+        assertNull(point.name)
+        assertEquals("sin", point.style.label)
         assertTrue(g.notes.any { it.contains("before it is used") })
-        assertTrue(g.notes.any { it.contains("'sin' can't be used as a name") })
+        assertTrue(g.notes.none { it.contains("sin") })
+    }
+
+    @Test
+    fun `a condition joined with and shades where it holds`() {
+        val g = graph("""{"items": [{"implicit": "y > x^2 and y < x + 2", "fill": true}]}""")
+        assertTrue(g.notes.toString(), g.notes.isEmpty())
+        val region = g.items.single() as ImplicitItem
+        assertEquals(Relation.HOLDS, region.relation)
+        val f = region.f.bind2(DoubleArray(0))
+        assertEquals(1.0, f(0.0, 1.0), 0.0)
+        assertEquals(0.0, f(0.0, 3.0), 0.0)
+        // A chain is a combined condition too; a single comparison still splits.
+        assertEquals(Relation.HOLDS, (graph("""{"implicit": "0 <= y <= 1"}""").items.single() as ImplicitItem).relation)
+        assertEquals(Relation.LE, (graph("""{"implicit": "x^2 + y^2 <= 4"}""").items.single() as ImplicitItem).relation)
+    }
+
+    @Test
+    fun `an unnamed curve or circle answers to the name the spec uses for it`() {
+        val g = graph(
+            """{"items": [
+                {"fn": "3*sin(x)"},
+                {"fn": "cos(x)"},
+                {"roots": "f"},
+                {"point": {"on": "g", "x": 0}},
+                {"circle": {"center": [0, 0], "r": 3}},
+                {"point": {"on": "c1", "angle": 40}, "name": "P"}
+            ]}"""
+        )
+        assertTrue(g.notes.toString(), g.notes.isEmpty())
+        assertEquals("f", (g.items[0] as FnItem).name)
+        assertEquals("g", (g.items[1] as FnItem).name)
+        assertEquals("c1", (g.items[4] as CircleItem).name)
+        // A spec that never mentions f leaves its curve unnamed.
+        assertNull((graph("""{"fn": "x^2"}""").items.single() as FnItem).name)
+    }
+
+    @Test
+    fun `points and functions may be written as items`() {
+        val g = graph("""{"items": [{"segment": [{"point": [0, 0]}, {"point": [1, 1]}]}, {"roots": {"fn": "x^2 - 1"}}]}""")
+        assertTrue(g.notes.toString(), g.notes.isEmpty())
+        assertEquals(2, g.items.size)
+        val s = scene("""{"segment": [{"point": [0, 0, 0]}, {"point": [0, 3, 0]}]}""")
+        assertTrue(s.notes.toString(), s.notes.isEmpty())
+    }
+
+    @Test
+    fun `a slider may be named t without changing a curve's own t`() {
+        val g = graph(
+            """{"params": {"t": {"value": 0.5, "min": -2, "max": 3}}, "items": [
+                {"point": ["1+t", "2-t"], "name": "X"},
+                {"parametric": ["cos(t)", "sin(t)"], "t": [0, "2pi"]}
+            ]}"""
+        )
+        assertTrue(g.notes.toString(), g.notes.isEmpty())
+        assertEquals("t", g.params.single().name)
+        // Shared values: the slider t, then X.x and X.y. At its own t = 0 the curve is at x = 1.
+        val curve = g.items[1] as ParametricItem
+        assertEquals(1.0, curve.x.bind(doubleArrayOf(0.5, 1.5, 1.5))(0.0), 1e-9)
+    }
+
+    @Test
+    fun `a vertical line meets a curve at one point`() {
+        val g = graph("""{"items": [{"fn": "x^2", "name": "par"}, {"fn": "x = 2", "name": "vert"}, {"intersections": ["par", "vert"], "name": "Q"}]}""")
+        assertTrue(g.notes.toString(), g.notes.isEmpty())
+        val q = g.items[2] as PointItem
+        assertEquals("Q", q.style.label)
+        assertEquals(2.0, (q.at as OnGraph).x.at(DoubleArray(0)), 1e-9)
+    }
+
+    @Test
+    fun `misplaced brackets are repaired`() {
+        // A label typed inside the list of points, with and without the list's own close.
+        val inside = graph("""{"items": [{"segment": [[-3,0],[3,0], "label": "y=0"]}]}""")
+        val unclosed = graph("""{"items": [{"segment": [[-3,0],[3,0], "label": "y=0"}]}""")
+        for (g in listOf(inside, unclosed)) {
+            assertTrue(g.notes.toString(), g.notes.isEmpty())
+            assertEquals("y=0", (g.items.single() as LineItem).style.label)
+        }
+        // A spec cut short is closed.
+        assertEquals(1, graph("""{"items": [{"fn": "x^2"}""").items.size)
     }
 
     @Test
