@@ -252,7 +252,7 @@ private fun DisplayMath(tex: String, complete: Boolean) {
             ) {
                 if (rendered != null) {
                     val annotated = remember(tex) {
-                        buildAnnotatedString { appendInlineContent(DISPLAY_MATH_ID, "$$$tex$$") }
+                        buildAnnotatedString { appendInlineContent(DISPLAY_MATH_ID, mathSource(tex, display = true)) }
                     }
                     val content = remember(rendered, density) {
                         mapOf(

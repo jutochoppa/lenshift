@@ -1,5 +1,8 @@
 package dev.lenshift.app.ui.markdown
 
+import com.agog.mathdisplay.parse.MTMathListBuilder
+import com.agog.mathdisplay.parse.MTParseError
+import com.agog.mathdisplay.parse.MTParseErrors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -9,6 +12,71 @@ class MathMarkdownTest {
 
     private fun maths(text: String) =
         MathScanner.split(text).filterIsInstance<InlineSegment.Math>().map { it.span }
+
+    /** Whether AndroidMath's parser (the same one the renderer uses) accepts [tex] after normalising. */
+    private fun typesets(tex: String): Boolean {
+        MathExtensions.install()
+        val error = MTParseError()
+        val list = MTMathListBuilder.buildFromString(TexNormalizer.normalize(tex), error)
+        return list != null && error.errorcode == MTParseErrors.ErrorNone
+    }
+
+    @Test
+    fun `a formula's placeholder text stays on one line`() {
+        // A line break in an inline-content placeholder left multi-line formulas blank.
+        assertEquals(
+            "$$\\begin{aligned} a &= b\\\\ c &= d \\end{aligned}$$",
+            mathSource("\\begin{aligned}\na &= b\\\\\nc &= d\n\\end{aligned}", display = true)
+        )
+        assertEquals("\$a + b\$", mathSource("a +\n b", display = false))
+    }
+
+    @Test
+    fun `primes become prime symbols the typesetter draws`() {
+        // The typesetter dropped the apostrophe: f'(x) showed as f(x).
+        assertEquals("f\\prime(x)", TexNormalizer.normalize("f'(x)"))
+        assertEquals("y\\prime\\prime + y = 0", TexNormalizer.normalize("y'' + y = 0"))
+        assertEquals("y\\prime^{2}", TexNormalizer.normalize("y'^2"))
+        assertEquals("y\\prime^{2}", TexNormalizer.normalize("y'^{2}"))
+        assertEquals("f\\prime\\prime(x) + g\\prime", TexNormalizer.normalize("f″(x) + g′"))
+        assertEquals("f\\prime x", TexNormalizer.normalize("f'x"))
+        // An apostrophe in text stays one.
+        assertEquals("\\text{it's } y\\prime", TexNormalizer.normalize("\\text{it's } y'"))
+        assertTrue(typesets("x^2 y'' + 6xy' - 24y = 0"))
+    }
+
+    @Test
+    fun `unicode symbols become commands the typesetter draws`() {
+        assertEquals("\\cos 30^{\\circ} = 0.866", TexNormalizer.normalize("\\cos 30° = 0.866"))
+        assertEquals("x \\ge 0, \\theta \\in \\mathbb{R}", TexNormalizer.normalize("x ≥ 0, θ ∈ ℝ"))
+        assertEquals("x^{2} + y_{1}", TexNormalizer.normalize("x² + y₁"))
+        assertEquals("x^{-12}", TexNormalizer.normalize("x⁻¹²"))
+        assertEquals("\\sqrt{x+1} + \\sqrt{2}", TexNormalizer.normalize("√(x+1) + √2"))
+        // Plain ASCII is left exactly as it was.
+        assertEquals("a + b", TexNormalizer.normalize("a + b"))
+        assertTrue(typesets("P:\\ 1 + 4 - 6 = -1\\ ✓ \\qquad \\cos 30° ≈ 0.866"))
+    }
+
+    @Test
+    fun `cases and aligned fit the typesetter's two columns`() {
+        // Cases rows without & get an empty second column.
+        assertEquals(
+            "\\begin{cases} x = 1&\\\\ y = 2 &\\end{cases}",
+            TexNormalizer.normalize("\\begin{cases} x = 1\\\\ y = 2 \\end{cases}")
+        )
+        val piecewise = "\\begin{cases} x & x>0\\\\ -x & x<0 \\end{cases}"
+        assertEquals(piecewise, TexNormalizer.normalize(piecewise))
+        // Aligned keeps its first & per row; further columns become space.
+        assertEquals(
+            "\\begin{aligned} &a \\qquad \\qquad \\text{one}\\\\ &b \\qquad \\qquad \\text{two} \\end{aligned}",
+            TexNormalizer.normalize("\\begin{aligned} &a &&\\text{one}\\\\ &b &&\\text{two} \\end{aligned}")
+        )
+
+        assertTrue(typesets("L(s) = P + s\\,v = \\begin{cases} x = 1 + s\\\\ y = 3 + 2s\\\\ z = s \\end{cases}"))
+        assertTrue(typesets("\\begin{cases} x = x_0 + at\\\\ y = y_0 + bt \\end{cases} \\qquad t \\in \\mathbb{R}"))
+        assertTrue(typesets("\\begin{aligned} &(1,0) &&\\text{first}\\\\ &(2,1) &&\\text{second} \\end{aligned}"))
+        assertTrue(typesets(piecewise))
+    }
 
     @Test
     fun `inline and display delimiters are recognised`() {

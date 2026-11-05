@@ -17,6 +17,16 @@ import androidx.compose.ui.text.withStyle
 /** A piece of LaTeX found in running text. */
 data class MathSpan(val tex: String, val display: Boolean)
 
+/**
+ * The text behind a typeset formula's placeholder, which a selection copies: its source
+ * with delimiters, on one line. A line break inside an inline-content placeholder makes the
+ * text layout spread it over several lines, and the formula image is then not drawn at all.
+ */
+fun mathSource(tex: String, display: Boolean): String {
+    val flat = tex.trim().replace(Regex("""\s*[\r\n]+\s*"""), " ")
+    return if (display) "$$$flat$$" else "$$flat$"
+}
+
 /** Output of [MathScanner.split]: plain text interleaved with math. */
 sealed interface InlineSegment {
     data class Text(val text: String) : InlineSegment
@@ -167,9 +177,142 @@ object TexNormalizer {
     )
 
     fun normalize(tex: String): String {
-        var s = tex.trim()
+        var s = symbols(tex.trim())
         for ((regex, replacement) in rules) s = regex.replace(s, replacement)
+        s = primes(s)
+        s = columns(s)
         return s.trim()
+    }
+
+    // The typesetter silently drops every character outside printable ASCII, and the
+    // apostrophe too: f'(x) came out as f(x) and 30° as 30. These become commands it draws.
+
+    private val superscriptDigits = mapOf(
+        '⁰' to "0", '¹' to "1", '²' to "2", '³' to "3", '⁴' to "4", '⁵' to "5", '⁶' to "6", '⁷' to "7",
+        '⁸' to "8", '⁹' to "9", '⁺' to "+", '⁻' to "-", '⁼' to "=", '⁽' to "(", '⁾' to ")", 'ⁿ' to "n", 'ⁱ' to "i"
+    )
+    private val subscriptDigits = mapOf(
+        '₀' to "0", '₁' to "1", '₂' to "2", '₃' to "3", '₄' to "4", '₅' to "5", '₆' to "6", '₇' to "7",
+        '₈' to "8", '₉' to "9", '₊' to "+", '₋' to "-", '₌' to "=", '₍' to "(", '₎' to ")",
+        'ₐ' to "a", 'ₑ' to "e", 'ₓ' to "x", 'ᵢ' to "i", 'ⱼ' to "j", 'ₙ' to "n"
+    )
+    private val unicodeSymbols: Map<Char, String> = mapOf(
+        '≤' to "\\le", '≥' to "\\ge", '≠' to "\\neq", '≈' to "\\approx", '≡' to "\\equiv",
+        '∼' to "\\sim", '≅' to "\\cong", '∝' to "\\propto", '±' to "\\pm", '∓' to "\\mp",
+        '×' to "\\times", '÷' to "\\div", '·' to "\\cdot", '⋅' to "\\cdot", '∘' to "\\circ",
+        '−' to "-", '–' to "-", '—' to "-", '∞' to "\\infty", '∈' to "\\in", '∉' to "\\notin",
+        '∋' to "\\ni", '⊂' to "\\subset", '⊆' to "\\subseteq", '⊃' to "\\supset", '⊇' to "\\supseteq",
+        '∪' to "\\cup", '∩' to "\\cap", '∅' to "\\emptyset", '→' to "\\to", '←' to "\\leftarrow",
+        '↔' to "\\leftrightarrow", '⇒' to "\\Rightarrow", '⇐' to "\\Leftarrow", '⇔' to "\\Leftrightarrow",
+        '↦' to "\\mapsto", '∀' to "\\forall", '∃' to "\\exists", '¬' to "\\neg", '∧' to "\\land",
+        '∨' to "\\lor", '∂' to "\\partial", '∇' to "\\nabla", '∫' to "\\int", '∮' to "\\oint",
+        '∑' to "\\sum", '∏' to "\\prod", '°' to "^{\\circ}", '…' to "\\ldots", '⋯' to "\\cdots",
+        '⟨' to "\\langle", '⟩' to "\\rangle", '‖' to "\\Vert", '⊥' to "\\perp", '∥' to "\\parallel",
+        '∠' to "\\angle", '△' to "\\triangle", '∴' to "\\therefore", '∵' to "\\because",
+        'ℝ' to "\\mathbb{R}", 'ℕ' to "\\mathbb{N}", 'ℤ' to "\\mathbb{Z}", 'ℚ' to "\\mathbb{Q}", 'ℂ' to "\\mathbb{C}",
+        '✓' to "\\checkmark", '✔' to "\\checkmark", '✗' to "\\times", '✘' to "\\times",
+        '“' to "\"", '”' to "\"", '‘' to "'", '’' to "'",
+        'α' to "\\alpha", 'β' to "\\beta", 'γ' to "\\gamma", 'δ' to "\\delta", 'ε' to "\\varepsilon",
+        'ζ' to "\\zeta", 'η' to "\\eta", 'θ' to "\\theta", 'ι' to "\\iota", 'κ' to "\\kappa",
+        'λ' to "\\lambda", 'μ' to "\\mu", 'ν' to "\\nu", 'ξ' to "\\xi", 'π' to "\\pi", 'ρ' to "\\rho",
+        'σ' to "\\sigma", 'τ' to "\\tau", 'υ' to "\\upsilon", 'φ' to "\\varphi", 'χ' to "\\chi",
+        'ψ' to "\\psi", 'ω' to "\\omega", 'Γ' to "\\Gamma", 'Δ' to "\\Delta", 'Θ' to "\\Theta",
+        'Λ' to "\\Lambda", 'Ξ' to "\\Xi", 'Π' to "\\Pi", 'Σ' to "\\Sigma", 'Υ' to "\\Upsilon",
+        'Φ' to "\\Phi", 'Ψ' to "\\Psi", 'Ω' to "\\Omega"
+    )
+    private val squareRoot = Regex("""√\s*(\d+(?:\.\d+)?|[A-Za-z](?![A-Za-z])|\(([^()]*)\)|\{([^{}]*)\})""")
+
+    private fun symbols(tex: String): String {
+        if (tex.all { it.code < 0x7F }) return tex
+        var s = squareRoot.replace(tex) { m ->
+            val inside = m.groups[2]?.value ?: m.groups[3]?.value ?: m.groupValues[1]
+            "\\sqrt{$inside}"
+        }
+        s = Regex("[${superscriptDigits.keys.joinToString("")}]+").replace(s) { m ->
+            "^{" + m.value.map { superscriptDigits[it] }.joinToString("") + "}"
+        }
+        s = Regex("[${subscriptDigits.keys.joinToString("")}]+").replace(s) { m ->
+            "_{" + m.value.map { subscriptDigits[it] }.joinToString("") + "}"
+        }
+        val out = StringBuilder(s.length + 16)
+        for ((i, ch) in s.withIndex()) {
+            val command = if (ch == '√') "\\surd" else unicodeSymbols[ch]
+            if (command == null) {
+                out.append(ch)
+                continue
+            }
+            out.append(command)
+            // A command needs a space before a letter: \theta x, not \thetax.
+            if (command.last().isLetter() && s.getOrNull(i + 1)?.isLetter() == true) out.append(' ')
+        }
+        return out.toString()
+    }
+
+    /** Text the apostrophe stays an apostrophe in. */
+    private val textGroup = Regex("""\\(?:text|textrm|textit|textbf|textsf|texttt|mbox)\{[^{}]*\}""")
+    /** A run of primes, and a superscript right after it that joins them: y'^2. */
+    private val primeRun = Regex("""(?<!\\)('+|[′″‴]+)(?:\^(\{([^{}]*)\}|\\[A-Za-z]+|[^\s{}\\]))?""")
+
+    /**
+     * `f'` and `y''` (or ′ ″ ‴) as `f\prime` and `y\prime\prime`. The font's prime glyph is
+     * built to sit beside the letter at full size; as a superscript it came out small and
+     * floating, with a gap before what follows.
+     */
+    private fun primes(tex: String): String {
+        if ('\'' !in tex && tex.none { it in "′″‴" }) return tex
+        val out = StringBuilder(tex.length + 16)
+        var last = 0
+        for (text in textGroup.findAll(tex)) {
+            out.append(primesIn(tex.substring(last, text.range.first))).append(text.value)
+            last = text.range.last + 1
+        }
+        return out.append(primesIn(tex.substring(last))).toString()
+    }
+
+    private fun primesIn(s: String): String = primeRun.replace(s) { m ->
+        val count = m.groupValues[1].sumOf { c ->
+            when (c) {
+                '″' -> 2
+                '‴' -> 3
+                else -> 1
+            }.toInt()
+        }
+        val primes = "\\prime".repeat(count)
+        val power = m.groups[3]?.value ?: m.groups[2]?.value
+        when {
+            power != null -> "$primes^{$power}"
+            // A command needs a space before a letter: \prime x, not \primex.
+            s.getOrNull(m.range.last + 1)?.isLetter() == true -> "$primes "
+            else -> primes
+        }
+    }
+
+    private val cases = Regex("""\\begin\{cases\}(.*?)\\end\{cases\}""", RegexOption.DOT_MATCHES_ALL)
+    private val aligned = Regex("""\\begin\{aligned\}(.*?)\\end\{aligned\}""", RegexOption.DOT_MATCHES_ALL)
+    private val ampersand = Regex("""(?<!\\)&""")
+
+    /**
+     * The typesetter takes exactly two columns in cases and at most two in aligned. Cases
+     * rows written without `&` get an empty second column; aligned rows keep their first `&`
+     * and the rest (`&&` columns) become space.
+     */
+    private fun columns(tex: String): String {
+        var s = cases.replace(tex) { m ->
+            val body = m.groupValues[1]
+            if ("\\begin" in body || ampersand.containsMatchIn(body)) return@replace m.value
+            val rows = body.split("\\\\").joinToString("\\\\") { row -> if (row.isBlank()) row else "$row&" }
+            "\\begin{cases}$rows\\end{cases}"
+        }
+        s = aligned.replace(s) { m ->
+            val body = m.groupValues[1]
+            if ("\\begin" in body) return@replace m.value
+            val rows = body.split("\\\\").joinToString("\\\\") { row ->
+                var first = true
+                ampersand.replace(row) { if (first) { first = false; "&" } else "\\qquad " }
+            }
+            "\\begin{aligned}$rows\\end{aligned}"
+        }
+        return s
     }
 
     /**
@@ -228,7 +371,7 @@ object InlineMarkdown {
                 flush()
                 val id = mathContent(math.span)
                 if (id != null) {
-                    appendInlineContent(id, if (math.span.display) "$$${math.span.tex}$$" else "$${math.span.tex}$")
+                    appendInlineContent(id, mathSource(math.span.tex, math.span.display))
                 } else {
                     withStyle(code) { append(math.span.tex) }
                 }
