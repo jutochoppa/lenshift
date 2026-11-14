@@ -10,6 +10,7 @@ POST /v1/chat/completions   OpenAI Chat Completions (SSE + non-streaming)
 POST /v1/responses          OpenAI Responses API (named SSE events)
 POST /v1/messages           Anthropic Messages (typed SSE events)
 POST /v1/images/generations OpenAI Images API (returns a generated PNG)
+POST /v1/images/edits       OpenAI Images API edits (multipart; returns a PNG)
 POST /v1beta/models/{m}:streamGenerateContent?alt=sse   Gemini
 POST /v1beta/models/{m}:generateContent                 Gemini non-streaming
 GET  /v1/models             OpenAI-style model list
@@ -217,7 +218,18 @@ class Handler(BaseHTTPRequestHandler):
 
         path_lower = self.path.lower()
         if path_lower.endswith("/images/generations"):
+            time.sleep(1.5)
             self._send_json(200, {"created": 0, "data": [{"b64_json": png_b64(body.get("prompt"))}]})
+            return
+        if path_lower.endswith("/images/edits"):
+            # A multipart form: the prompt as a field, the pictures as `image` / `image[]` files.
+            raw = body.get("_raw", "")
+            found = re.search(r'name="prompt"\r\n\r\n(.*?)\r\n--', raw, re.S)
+            if 'name="image' not in raw:
+                self._send_json(400, {"error": {"message": "image is required"}})
+                return
+            time.sleep(1.5)
+            self._send_json(200, {"created": 0, "data": [{"b64_json": png_b64("edit " + (found.group(1) if found else ""))}]})
             return
         if "chat/completions" in path_lower and "image" in (body.get("modalities") or []):
             prompt = body.get("messages", [{}])[-1].get("content")

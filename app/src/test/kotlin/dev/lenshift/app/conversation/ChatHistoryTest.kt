@@ -91,11 +91,11 @@ class ChatHistoryTest {
         val ask = dev.lenshift.app.data.settings.QuickAction.ASK
         assertTrue(ask.prompt.isEmpty())
         assertEquals(ask, AppSettings.fromJson(JSONObject()).defaultQuickAction)
-        assertEquals(ask, dev.lenshift.app.data.settings.QuickAction.fromId("unknown"))
+        assertEquals(ask, AppSettings.fromJson(JSONObject().put("defaultAction", "unknown")).defaultQuickAction)
         // The old key was saved automatically but never applied, so it is not carried over.
         assertEquals(ask, AppSettings.fromJson(JSONObject().put("defaultQuickAction", "explain")).defaultQuickAction)
         val solve = AppSettings.fromJson(JSONObject())
-            .copy(defaultQuickAction = dev.lenshift.app.data.settings.QuickAction.SOLVE)
+            .copy(defaultActionId = dev.lenshift.app.data.settings.QuickAction.SOLVE.id)
         assertEquals(dev.lenshift.app.data.settings.QuickAction.SOLVE, AppSettings.fromJson(solve.toJson()).defaultQuickAction)
     }
 

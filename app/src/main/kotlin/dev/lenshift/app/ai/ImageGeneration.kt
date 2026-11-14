@@ -2,9 +2,11 @@ package dev.lenshift.app.ai
 
 import dev.lenshift.app.ai.transport.CallRegistry
 import dev.lenshift.app.ai.transport.HttpSupport
+import dev.lenshift.app.ai.transport.ProviderLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
@@ -79,8 +81,21 @@ object ImageGeneration {
 
     fun imagesBody(model: String, request: ImageRequest): JSONObject {
         val name = KnownModels.normalize(model)
-        val shape = shape(request.aspect)
-        val size = when {
+        return JSONObject().apply {
+            put("model", model)
+            put("prompt", request.prompt)
+            put("n", 1)
+            put("size", size(model, request.aspect))
+            // gpt-image always returns base64 and rejects this field.
+            if (name.startsWith("dall-e")) put("response_format", "b64_json")
+        }
+    }
+
+    /** The Images API size closest to [aspect] that [model] offers. */
+    private fun size(model: String, aspect: String?): String {
+        val name = KnownModels.normalize(model)
+        val shape = shape(aspect)
+        return when {
             name.startsWith("dall-e-2") -> "1024x1024"
             name.startsWith("dall-e") -> when (shape) {
                 1 -> "1792x1024"
@@ -93,15 +108,29 @@ object ImageGeneration {
                 else -> "1024x1024"
             }
         }
-        return JSONObject().apply {
-            put("model", model)
-            put("prompt", request.prompt)
-            put("n", 1)
-            put("size", size)
-            // gpt-image always returns base64 and rejects this field.
-            if (name.startsWith("dall-e")) put("response_format", "b64_json")
-        }
     }
+
+    /**
+     * An edit of [ImageRequest.inputs] through the Images API's `/images/edits`: a form with
+     * the prompt and each picture as a file (`image`, or `image[]` for several).
+     */
+    fun editsBody(model: String, request: ImageRequest): MultipartBody {
+        val form = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("model", model)
+            .addFormDataPart("prompt", request.prompt)
+            .addFormDataPart("n", "1")
+            .addFormDataPart("size", size(model, request.aspect))
+        val field = if (request.inputs.size == 1) "image" else "image[]"
+        request.inputs.forEachIndexed { i, image ->
+            val bytes = java.util.Base64.getMimeDecoder().decode(image.base64)
+            val extension = if (image.mimeType.contains("png")) "png" else "jpg"
+            form.addFormDataPart(field, "image-${i + 1}.$extension", bytes.toRequestBody(image.mimeType.toMediaType()))
+        }
+        return form.build()
+    }
+
+    fun editsUrl(profile: ProviderProfile): String = "${profile.normalizedBase()}/images/edits"
 
     fun geminiBody(request: ImageRequest): JSONObject {
         val parts = JSONArray().put(JSONObject().put("text", request.prompt))
@@ -207,16 +236,27 @@ object ImageGeneration {
     suspend fun generate(profile: ProviderProfile, apiKey: String?, request: ImageRequest, callKey: String): List<ByteArray> =
         withContext(Dispatchers.IO) {
             val route = route(profile) ?: throw AiError.Protocol("${profile.protocol.label} can't create images")
+            // Editing a picture with gpt-image or DALL·E is a separate, multipart endpoint.
+            val edit = route == Route.IMAGES_API && request.inputs.isNotEmpty()
             val (scheme, body) = when (route) {
                 Route.CHAT -> HttpSupport.AuthScheme.BEARER to chatBody(profile.modelId, request, isOpenRouter(profile))
-                Route.IMAGES_API -> HttpSupport.AuthScheme.BEARER to imagesBody(profile.modelId, request)
+                Route.IMAGES_API -> HttpSupport.AuthScheme.BEARER to if (edit) {
+                    // What the log records of the form; the pictures themselves stay out.
+                    JSONObject().put("model", profile.modelId).put("prompt", request.prompt)
+                        .put("images", request.inputs.size).put("size", size(profile.modelId, request.aspect))
+                } else {
+                    imagesBody(profile.modelId, request)
+                }
                 Route.GEMINI -> HttpSupport.AuthScheme.X_GOOG_API_KEY to geminiBody(request)
             }
-            val call = HttpSupport.requestBuilder(profile, url(profile, route), apiKey, scheme)
-                .header("Content-Type", "application/json")
+            val endpoint = if (edit) editsUrl(profile) else url(profile, route)
+            val builder = HttpSupport.requestBuilder(profile, endpoint, apiKey, scheme)
                 .tag(CallRegistry.Background::class.java, CallRegistry.Background(callKey))
-                .post(body.toString().toRequestBody(JSON))
-                .build()
+            val call = if (edit) {
+                builder.post(editsBody(profile.modelId, request)).build()
+            } else {
+                builder.header("Content-Type", "application/json").post(body.toString().toRequestBody(JSON)).build()
+            }
             val raw = HttpSupport.execute(profile, call).use { it.body?.string().orEmpty() }
             val parsed = runCatching {
                 when (route) {
@@ -224,7 +264,10 @@ object ImageGeneration {
                     Route.IMAGES_API -> parseImages(raw)
                     Route.GEMINI -> parseGemini(raw)
                 }
-            }.getOrElse { throw AiError.Protocol("The image model's reply could not be read.") }
+            }.getOrElse {
+                ProviderLog.unreadable(profile, endpoint, apiKey, null, raw, "the image reply could not be parsed", body)
+                throw AiError.Protocol("The image model's reply could not be read.")
+            }
             val images = parsed.images.mapNotNull { image ->
                 when (image) {
                     is ImageData.Bytes -> image.data
@@ -232,6 +275,7 @@ object ImageGeneration {
                 }
             }
             if (images.isEmpty()) {
+                ProviderLog.unreadable(profile, endpoint, apiKey, null, raw, "no picture in the reply", body)
                 throw AiError.Protocol(
                     parsed.text?.let { "The model answered without a picture: ${it.take(160)}" } ?: "The model returned no picture."
                 )

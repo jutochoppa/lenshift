@@ -120,6 +120,48 @@ class AdapterBodyTest {
     }
 
     @Test
+    fun `responses api asks for the reasoning summary inside reasoning`() {
+        // A top-level reasoning_summary is not a Responses API parameter: lenient gateways
+        // ignored it, strict OpenAI-compatible servers rejected every chat with a 400.
+        val p = profile(ApiProtocol.OPENAI_RESPONSES, model = "o3").copy(reasoningMode = ReasoningMode.MEDIUM)
+        val body = OpenAiResponsesAdapter().buildBodyForTest(request(p, reasoning = ReasoningMode.MEDIUM))
+        assertFalse(body.has("reasoning_summary"))
+        val reasoning = body.getJSONObject("reasoning")
+        assertEquals("medium", reasoning.getString("effort"))
+        assertEquals("auto", reasoning.getString("summary"))
+
+        // Automatic sends no reasoning at all, as the connection test does.
+        val auto = OpenAiResponsesAdapter().buildBodyForTest(request(profile(ApiProtocol.OPENAI_RESPONSES, model = "o3")))
+        assertFalse(auto.has("reasoning"))
+        assertFalse(auto.has("reasoning_summary"))
+    }
+
+    @Test
+    fun `responses api replays earlier answers as plain assistant text`() {
+        // Assistant content typed input_text is refused by strict servers; plain text is the
+        // documented form for an earlier answer.
+        val p = profile(ApiProtocol.OPENAI_RESPONSES)
+        val body = OpenAiResponsesAdapter().buildBodyForTest(
+            request(p).copy(
+                messages = listOf(
+                    ChatMessage(ChatMessage.Role.SYSTEM, "be brief"),
+                    ChatMessage(ChatMessage.Role.USER, "first question"),
+                    ChatMessage(ChatMessage.Role.ASSISTANT, "first answer"),
+                    ChatMessage(ChatMessage.Role.USER, "follow-up")
+                )
+            )
+        )
+        val input = body.getJSONArray("input")
+        assertEquals(3, input.length())
+        val answer = input.getJSONObject(1)
+        assertEquals("assistant", answer.getString("role"))
+        assertEquals("first answer", answer.get("content"))
+        val followUp = input.getJSONObject(2).getJSONArray("content").getJSONObject(0)
+        assertEquals("input_text", followUp.getString("type"))
+        assertEquals("follow-up", followUp.getString("text"))
+    }
+
+    @Test
     fun `responses api forwards a continuation token`() {
         val adapter = OpenAiResponsesAdapter()
         val body = adapter.buildBodyForTest(

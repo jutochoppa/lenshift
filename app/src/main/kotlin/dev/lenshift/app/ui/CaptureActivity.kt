@@ -112,6 +112,7 @@ class CaptureActivity : ComponentActivity() {
                         attachmentImage = conversation::attachment,
                         images = images,
                         onRetryImage = conversation::retryImage,
+                        onImageModelChosen = conversation::retryImagesNeedingModel,
                         onRequestChatScreenshot = ::awaitChatScreenshot,
                         chatScreenshot = chatScreenshot,
                         onChatScreenshotDone = { chatScreenshot = null },
@@ -187,8 +188,11 @@ class CaptureActivity : ComponentActivity() {
         sourceLabel = launchIntent?.getStringExtra(EXTRA_SOURCE_LABEL)
         preloadedText = launchIntent?.getStringExtra(EXTRA_TEXT)
         // A launcher shortcut may name an action; otherwise use the one chosen in settings.
-        defaultAction = QuickAction.fromIdOrNull(launchIntent?.getStringExtra(EXTRA_DEFAULT_ACTION))
-            ?: ServiceLocator.settings.current.defaultQuickAction
+        // A shortcut keeps working after the user deletes its stock action from the chips.
+        val settings = ServiceLocator.settings.current
+        defaultAction = launchIntent?.getStringExtra(EXTRA_DEFAULT_ACTION)
+            ?.let { id -> settings.action(id) ?: QuickAction.stock(id) }
+            ?: settings.defaultQuickAction
 
         // The assist session hands the bitmap over out-of-band.
         val handedOff = CaptureHandoff.take()

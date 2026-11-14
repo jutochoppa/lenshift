@@ -23,7 +23,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.lenshift.app.ai.PromptBuilder
 import dev.lenshift.app.data.settings.AppSettings
-import dev.lenshift.app.data.settings.QuickAction
 import dev.lenshift.app.di.ServiceLocator
 
 @Composable
@@ -220,24 +219,6 @@ fun AdvancedSettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                     )
-                }
-            }
-
-            // --------------------------------------------------------- default action
-            item {
-                SectionHeader("Default action")
-                SettingsCard {
-                    QuickAction.entries.forEach { action ->
-                        SettingRow(
-                            title = action.label,
-                            subtitle = if (action.id == settings.defaultQuickAction.id) {
-                                "Currently the default"
-                            } else null,
-                            onClick = {
-                                ServiceLocator.settings.setDefaultQuickAction(action)
-                            }
-                        )
-                    }
                 }
             }
 

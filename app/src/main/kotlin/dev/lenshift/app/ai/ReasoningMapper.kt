@@ -33,14 +33,17 @@ object ReasoningMapper {
         body: JSONObject,
         mode: ReasoningMode,
         capabilities: ModelCapabilities,
-        openRouterStyle: Boolean
+        openRouterStyle: Boolean,
+        /** A level of the user's own ([CustomReasoning.selected]), sent as written. */
+        custom: String? = null
     ) {
-        val level = effectiveMode(mode, capabilities)
-        if (level == ReasoningMode.AUTO) return
         if (capabilities.strictReasoningRejection) return
         if (capabilities.reasoning == Tri.NO) return
-
-        val effort = effortString(level, capabilities) ?: return
+        val effort = custom ?: run {
+            val level = effectiveMode(mode, capabilities)
+            if (level == ReasoningMode.AUTO) return
+            effortString(level, capabilities) ?: return
+        }
 
         if (openRouterStyle) {
             body.put(
@@ -55,22 +58,32 @@ object ReasoningMapper {
     /**
      * Applies reasoning to an [OI] Responses API body.
      *
-     * The Responses API takes a nested `reasoning: { effort }` object and, for
-     * reasoning models, expects `include: ["reasoning.encrypted_content"]` when the
-     * caller wants to continue a conversation statelessly.
+     * The Responses API takes a nested `reasoning: { effort, summary }` object; the summary
+     * is what streams back as `response.reasoning_summary_text.delta`. It has no top-level
+     * summary parameter, and strict servers reject unknown parameters with a 400.
      */
     fun applyOpenAiResponses(
         body: JSONObject,
         mode: ReasoningMode,
-        capabilities: ModelCapabilities
+        capabilities: ModelCapabilities,
+        /** A level of the user's own ([CustomReasoning.selected]), sent as written. */
+        custom: String? = null
     ) {
-        val level = effectiveMode(mode, capabilities)
-        if (level == ReasoningMode.AUTO) return
         if (capabilities.reasoning == Tri.NO) return
-
-        val effort = effortString(level, capabilities) ?: return
-        body.put("reasoning", JSONObject().put("effort", effort))
+        val effort = custom ?: run {
+            val level = effectiveMode(mode, capabilities)
+            if (level == ReasoningMode.AUTO) return
+            effortString(level, capabilities) ?: return
+        }
+        val reasoning = JSONObject().put("effort", effort)
+        // With reasoning turned off there is nothing to summarise.
+        if (!effort.equals("none", ignoreCase = true)) reasoning.put("summary", "auto")
+        body.put("reasoning", reasoning)
     }
+
+    /** A level of the user's own that names a built-in one ("High", "low"), as that level. */
+    private fun builtIn(custom: String): ReasoningMode? =
+        ReasoningMode.entries.firstOrNull { it != ReasoningMode.AUTO && it.id.equals(custom.trim(), ignoreCase = true) }
 
     /**
      * Applies Anthropic extended thinking.
@@ -86,8 +99,18 @@ object ReasoningMapper {
         mode: ReasoningMode,
         capabilities: ModelCapabilities,
         explicitBudget: Int?,
-        maxTokens: Int?
+        maxTokens: Int?,
+        /** A level of the user's own: a token budget ("6000") or a built-in level's name. */
+        custom: String? = null
     ): Int? {
+        // Anthropic takes a number, so a level of the user's own is a budget or a known name.
+        if (custom != null) {
+            val budget = custom.trim().toIntOrNull()
+            return when {
+                budget != null -> applyAnthropic(body, ReasoningMode.MEDIUM, capabilities.copy(reasoningModes = emptyList()), budget, maxTokens)
+                else -> builtIn(custom)?.let { applyAnthropic(body, it, capabilities, explicitBudget, maxTokens) }
+            }
+        }
         val level = effectiveMode(mode, capabilities)
         if (level == ReasoningMode.AUTO) return null
         if (capabilities.reasoning == Tri.NO) return null
@@ -131,8 +154,19 @@ object ReasoningMapper {
         generationConfig: JSONObject,
         mode: ReasoningMode,
         capabilities: ModelCapabilities,
-        explicitBudget: Int?
+        explicitBudget: Int?,
+        /** A level of the user's own: a `thinkingBudget` ("8192"), else a `thinkingLevel` ("low"). */
+        custom: String? = null
     ) {
+        if (custom != null) {
+            if (capabilities.reasoning == Tri.NO) return
+            val value = custom.trim()
+            val config = JSONObject()
+            value.toIntOrNull()?.let { config.put("thinkingBudget", it) } ?: config.put("thinkingLevel", value)
+            config.put("includeThoughts", true)
+            generationConfig.put("thinkingConfig", config)
+            return
+        }
         val level = effectiveMode(mode, capabilities)
         if (level == ReasoningMode.AUTO) return
         if (capabilities.reasoning == Tri.NO) return
@@ -160,7 +194,16 @@ object ReasoningMapper {
      * Applies Ollama's `think` field. Ollama accepts a boolean on models that support
      * it, and a level string on newer builds.
      */
-    fun applyOllama(body: JSONObject, mode: ReasoningMode, capabilities: ModelCapabilities) {
+    fun applyOllama(body: JSONObject, mode: ReasoningMode, capabilities: ModelCapabilities, custom: String? = null) {
+        if (custom != null) {
+            if (capabilities.reasoning == Tri.NO) return
+            when (val value = custom.trim().lowercase()) {
+                "true", "on" -> body.put("think", true)
+                "false", "off" -> body.put("think", false)
+                else -> body.put("think", custom.trim().takeIf { value.isNotEmpty() } ?: return)
+            }
+            return
+        }
         val level = effectiveMode(mode, capabilities)
         if (level == ReasoningMode.AUTO) return
         if (capabilities.reasoning == Tri.NO) return
@@ -269,8 +312,32 @@ object ReasoningMapper {
         mode: ReasoningMode,
         capabilities: ModelCapabilities,
         openRouterStyle: Boolean,
-        explicitBudget: Int? = null
+        explicitBudget: Int? = null,
+        custom: String? = null
     ): String {
+        if (custom != null) {
+            val value = custom.trim()
+            return when (capabilities.mechanism) {
+                ReasoningMechanism.NONE -> "Nothing sent."
+                ReasoningMechanism.EFFORT, ReasoningMechanism.OPENROUTER_EFFORT ->
+                    if (openRouterStyle || capabilities.mechanism == ReasoningMechanism.OPENROUTER_EFFORT) {
+                        "Sends reasoning.effort: \"$value\", as you wrote it"
+                    } else {
+                        "Sends reasoning_effort: \"$value\", as you wrote it"
+                    }
+                ReasoningMechanism.ANTHROPIC_BUDGET -> value.toIntOrNull()
+                    ?.let { "Sends thinking.budget_tokens: ${it.coerceAtLeast(ANTHROPIC_MIN_BUDGET)}" }
+                    ?: builtIn(value)?.let { wireValue(it, capabilities, openRouterStyle, explicitBudget) }
+                    ?: "Nothing sent: Anthropic takes a number of thinking tokens, such as 8000."
+                ReasoningMechanism.GEMINI_THINKING ->
+                    if (value.toIntOrNull() != null) "Sends thinkingBudget: $value" else "Sends thinkingLevel: \"$value\""
+                ReasoningMechanism.BOOLEAN_OR_LEVEL -> "Sends think: " + when (value.lowercase()) {
+                    "true", "on" -> "true"
+                    "false", "off" -> "false"
+                    else -> "\"$value\""
+                }
+            }
+        }
         val level = effectiveMode(mode, capabilities)
         if (level == ReasoningMode.AUTO) return "Nothing sent; the model uses its default."
         return when (capabilities.mechanism) {

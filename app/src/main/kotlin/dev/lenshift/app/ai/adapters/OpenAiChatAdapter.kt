@@ -86,7 +86,8 @@ class OpenAiChatAdapter : BaseAdapter() {
             body = body,
             mode = request.reasoningMode,
             capabilities = capabilities,
-            openRouterStyle = isOpenRouter(profile)
+            openRouterStyle = isOpenRouter(profile),
+            custom = profile.customReasoning.selected
         )
 
         mergeExtra(body, profile)

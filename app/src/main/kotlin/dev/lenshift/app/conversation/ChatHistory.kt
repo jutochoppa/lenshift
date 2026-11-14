@@ -35,7 +35,8 @@ sealed interface TurnImage {
 
     data class Pending(override val prompt: String) : TurnImage
     data class Ready(override val prompt: String, val id: String, val model: String) : TurnImage
-    data class Failed(override val prompt: String, val message: String) : TurnImage
+    /** [needsModel]: nothing was tried, because no image model is chosen. */
+    data class Failed(override val prompt: String, val message: String, val needsModel: Boolean = false) : TurnImage
 }
 
 /**
@@ -172,7 +173,11 @@ object ChatHistoryFormat {
      * the answer with Markdown and LaTeX markers removed.
      */
     fun title(firstQuestion: String, typed: Boolean, firstAnswer: String): String {
-        val source = if (typed && firstQuestion.isNotBlank()) strip(firstQuestion) else firstSentence(firstAnswer)
+        val source = if (typed && firstQuestion.isNotBlank()) {
+            strip(firstQuestion)
+        } else {
+            firstSentence(dev.lenshift.app.ai.LeakedToolCode.strip(firstAnswer))
+        }
         val clean = source.ifBlank { firstQuestion.trim() }
         return if (clean.length <= 64) clean else clean.take(61).trimEnd() + "…"
     }

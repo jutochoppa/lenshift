@@ -11,8 +11,11 @@ import dev.lenshift.app.ai.ProviderProfile
 import dev.lenshift.app.ai.ReasoningMode
 import dev.lenshift.app.ai.StreamEvent
 import dev.lenshift.app.ai.transport.HttpSupport
+import dev.lenshift.app.ai.transport.ProviderLog
 import dev.lenshift.app.ai.transport.SseParser
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.catch
@@ -139,20 +142,58 @@ abstract class BaseAdapter : ProviderAdapter {
 
             if (!isSse) {
                 val raw = response.body?.string().orEmpty()
-                if (raw.isNotBlank()) {
-                    transform(raw)?.let { emit(it) }
+                val event = if (raw.isBlank()) null else try {
+                    transform(raw)
+                } catch (e: AiError) {
+                    ProviderLog.streamError(profile, url, apiKey, body, raw, e)
+                    throw e
+                }
+                if (event != null) {
+                    emit(event)
+                } else {
+                    ProviderLog.unreadable(profile, url, apiKey, contentType, raw, "nothing to read in a non-streamed reply", body)
                 }
             } else {
+                // Debug builds note what arrived, so a stream with no answer in it can be
+                // logged with the kinds of event it did have.
+                val seen = if (ProviderLog.enabled) LinkedHashMap<String, Int>() else null
+                var sample: String? = null
+                var answered = false
                 SseParser.parse(response).collect { event ->
                     val mapped = try {
                         transform(event.data)
                     } catch (e: AiError) {
+                        ProviderLog.streamError(profile, url, apiKey, body, render(event), e)
                         throw e
                     } catch (e: Exception) {
                         // A single malformed frame must not kill the stream.
                         null
                     }
+                    // An error event the adapter doesn't know (a relay's own) ends the
+                    // answer with its message instead of leaving it empty.
+                    if (mapped == null) {
+                        val kind = event.name ?: EVENT_TYPE.find(event.data.take(200))?.groupValues?.get(1)
+                        if (StreamErrors.isError(kind)) {
+                            val error = AiError.Server(200, StreamErrors.message(event.data) ?: "The provider sent $kind")
+                            ProviderLog.streamError(profile, url, apiKey, body, render(event), error)
+                            throw error
+                        }
+                    }
+                    if (seen != null) {
+                        val kind = event.name ?: EVENT_TYPE.find(event.data.take(200))?.groupValues?.get(1) ?: "data"
+                        if (seen.size < 20 || kind in seen) seen[kind] = (seen[kind] ?: 0) + 1
+                        if (mapped == null && sample == null) sample = render(event)
+                        if (mapped is StreamEvent.TextDelta || mapped is StreamEvent.ReasoningDelta) answered = true
+                    }
                     if (mapped != null) emit(mapped)
+                }
+                if (seen != null && !answered) {
+                    val kinds = seen.entries.joinToString(", ") { "${it.key} ×${it.value}" }.ifEmpty { "none" }
+                    ProviderLog.unreadable(
+                        profile, url, apiKey, contentType,
+                        "events: $kinds\nfirst unread: ${sample ?: "-"}",
+                        "the stream ended without any answer text", body
+                    )
                 }
             }
         }
@@ -164,8 +205,12 @@ abstract class BaseAdapter : ProviderAdapter {
         // difference between a socket reset, a TLS failure and a parse error is exactly
         // what a user (or a bug report) needs to see.
         val detail = t.message?.takeIf { it.isNotBlank() } ?: t::class.simpleName ?: "unknown"
+        if (currentCoroutineContext().isActive) ProviderLog.streamError(profile, url, apiKey, body, null, t)
         throw AiError.Protocol("Stream failed: $detail")
     }
+
+    private fun render(event: SseParser.Event) =
+        if (event.name != null) "event: ${event.name}\n${event.data}" else event.data
 
     /** Newline-delimited JSON variant (Ollama). */
     protected fun ndjsonPost(
@@ -179,12 +224,17 @@ abstract class BaseAdapter : ProviderAdapter {
         post(profile, url, apiKey, scheme, body) { response ->
             val contentType = response.header("Content-Type").orEmpty()
             if (!contentType.contains("json", ignoreCase = true)) {
+                if (ProviderLog.enabled) {
+                    val raw = runCatching { response.body?.string() }.getOrNull().orEmpty()
+                    ProviderLog.unreadable(profile, url, apiKey, contentType, raw, "expected JSON lines", body)
+                }
                 throw AiError.Protocol("Expected JSON, got '$contentType'")
             }
             dev.lenshift.app.ai.transport.NdjsonParser.parse(response).collect { line ->
                 val mapped = try {
                     transform(line)
                 } catch (e: AiError) {
+                    ProviderLog.streamError(profile, url, apiKey, body, line, e)
                     throw e
                 } catch (e: Exception) {
                     null
@@ -200,6 +250,7 @@ abstract class BaseAdapter : ProviderAdapter {
         // difference between a socket reset, a TLS failure and a parse error is exactly
         // what a user (or a bug report) needs to see.
         val detail = t.message?.takeIf { it.isNotBlank() } ?: t::class.simpleName ?: "unknown"
+        if (currentCoroutineContext().isActive) ProviderLog.streamError(profile, url, apiKey, body, null, t)
         throw AiError.Protocol("Stream failed: $detail")
     }
 
@@ -227,6 +278,7 @@ abstract class BaseAdapter : ProviderAdapter {
                 latencyMs = System.currentTimeMillis() - started
             )
         } catch (e: AiError) {
+            ProviderLog.failed("connection test", profile, e.message ?: "Unknown failure")
             ConnectionTest(
                 ok = false,
                 headline = e::class.simpleName ?: "Error",
@@ -234,6 +286,7 @@ abstract class BaseAdapter : ProviderAdapter {
                 latencyMs = System.currentTimeMillis() - started
             )
         } catch (e: Exception) {
+            if (e !is CancellationException) ProviderLog.failed("connection test", profile, e.message ?: "Unknown failure", e)
             ConnectionTest(
                 ok = false,
                 headline = "Error",
@@ -245,5 +298,8 @@ abstract class BaseAdapter : ProviderAdapter {
 
     protected companion object {
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+
+        /** The `type` of a JSON event, for the debug log's tally of what a stream carried. */
+        val EVENT_TYPE = Regex(""""type"\s*:\s*"([^"]{1,60})"""")
     }
 }

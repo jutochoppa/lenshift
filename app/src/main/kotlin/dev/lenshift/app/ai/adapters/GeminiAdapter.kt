@@ -87,7 +87,8 @@ class GeminiAdapter : BaseAdapter() {
             generationConfig = generationConfig,
             mode = request.reasoningMode,
             capabilities = request.capabilities,
-            explicitBudget = profile.reasoningTokenBudget
+            explicitBudget = profile.reasoningTokenBudget,
+            custom = profile.customReasoning.selected
         )
 
         if (generationConfig.length() > 0) body.put("generationConfig", generationConfig)

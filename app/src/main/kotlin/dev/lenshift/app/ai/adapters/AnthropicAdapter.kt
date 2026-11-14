@@ -86,7 +86,8 @@ class AnthropicAdapter : BaseAdapter() {
             mode = request.reasoningMode,
             capabilities = request.capabilities,
             explicitBudget = profile.reasoningTokenBudget,
-            maxTokens = maxTokens
+            maxTokens = maxTokens,
+            custom = profile.customReasoning.selected
         )
         if (requiredMax != null && requiredMax > maxTokens) maxTokens = requiredMax
 

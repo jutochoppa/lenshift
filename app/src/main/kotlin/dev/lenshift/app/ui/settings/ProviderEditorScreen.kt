@@ -1,9 +1,13 @@
 package dev.lenshift.app.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -191,6 +195,10 @@ private fun ProviderEditorContent(
         if (existing != null && profile.baseUrl.isNotBlank()) loadModels()
     }
 
+    // The system Back gesture saves like the arrow does. It used to pop the screen without
+    // saving, so edits made since the last test or save were silently lost.
+    BackHandler { persist(); onBack() }
+
     SettingsScaffold(
         title = if (saved) profile.displayName else "New provider",
         onBack = { persist(); onBack() }
@@ -281,26 +289,21 @@ private fun ProviderEditorContent(
                             onClick = { runTest() },
                             enabled = !testing && profile.baseUrl.isNotBlank()
                         ) {
+                            // A fixed-size spinner beside the label: sized by height alone it
+                            // stretched across the row and spun as a wide ellipse.
                             if (testing) {
                                 CircularProgressIndicator(
-                                    modifier = Modifier.height(14.dp),
+                                    modifier = Modifier.size(14.dp),
                                     strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
+                                    color = LocalContentColor.current
                                 )
+                                Spacer(Modifier.width(8.dp))
+                                Text("Testing…", fontSize = 11.sp)
                             } else {
                                 Text("Test connection", fontSize = 11.sp)
                             }
                         }
                     }
-
-                    ModelsEditor(
-                        profile = profile,
-                        listed = listed,
-                        loading = loadingModels,
-                        listError = listError,
-                        onOpenList = ::loadModels,
-                        onChange = { profile = it }
-                    )
 
                     testResult?.let { result ->
                         Surface(
@@ -325,6 +328,15 @@ private fun ProviderEditorContent(
                             }
                         }
                     }
+
+                    ModelsEditor(
+                        profile = profile,
+                        listed = listed,
+                        loading = loadingModels,
+                        listError = listError,
+                        onOpenList = ::loadModels,
+                        onChange = { profile = it }
+                    )
                 }
             }
 

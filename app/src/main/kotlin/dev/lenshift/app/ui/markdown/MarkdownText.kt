@@ -401,7 +401,7 @@ object MarkdownParser {
 
     fun parse(markdown: String): List<MdBlock> {
         val blocks = mutableListOf<MdBlock>()
-        val lines = markdown.lines()
+        val lines = UiTags.clean(dev.lenshift.app.ai.LeakedToolCode.strip(markdown)).lines()
 
         var i = 0
         val paragraph = StringBuilder()

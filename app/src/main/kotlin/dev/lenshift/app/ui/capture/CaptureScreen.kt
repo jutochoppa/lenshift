@@ -211,6 +211,8 @@ fun CaptureScreen(
     /** Pictures answers asked for, and how to make a failed one again. */
     images: Map<ImageKey, TurnImage> = emptyMap(),
     onRetryImage: (ImageKey) -> Unit = {},
+    /** Makes the pictures that were waiting for an image model to be chosen. */
+    onImageModelChosen: () -> Unit = {},
     /** Hides the overlay so the user can go to another screen and capture it for the chat. */
     onRequestChatScreenshot: () -> Unit = {},
     /** A screenshot taken for the chat, waiting for the user to pick what to add. */
@@ -292,6 +294,9 @@ fun CaptureScreen(
     val providerLabel = (settings.profiles.firstOrNull { it.id == settings.activeProfileId }
         ?: settings.profiles.firstOrNull())?.displayName.orEmpty()
 
+    /** A stock action as the user edited it; its button keeps working after they delete the chip. */
+    fun yours(stock: QuickAction): QuickAction = settings.action(stock.id) ?: stock
+
     // ------------------------------------------------------------------ animations
     val entrance = remember { Animatable(0f) }
     val edgeGlow = remember { Animatable(0f) }
@@ -332,6 +337,8 @@ fun CaptureScreen(
     val pendingAttachments = remember { mutableStateListOf<Bitmap>() }
     /** An image shown full screen from the tray or the thread. */
     var previewImage by remember { mutableStateOf<Bitmap?>(null) }
+    /** The image model picker, opened from a picture that is waiting for one. */
+    var choosingImageModel by remember { mutableStateOf(false) }
     val photoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(MAX_ATTACHMENTS)
     ) { uris ->
@@ -396,7 +403,7 @@ fun CaptureScreen(
         if (text != null) {
             // Selected text is a search query: a few words on their own give "Explain" no
             // context, so ask about them directly, as a search answer would.
-            val query = question ?: if (action == QuickAction.EXPLAIN && text.length <= 80) {
+            val query = question ?: if (action.asksAboutShortText && text.length <= 80) {
                 "What is \"${text.replace('\n', ' ')}\"? Give a concise overview."
             } else null
             onAsk(action, text, null, query, takeAttachments())
@@ -948,7 +955,7 @@ fun CaptureScreen(
                             onCopy = { currentSelectedText()?.let(onCopy) },
                             onTranslate = {
                                 resultTab = ResultTab.Chat
-                                send(QuickAction.TRANSLATE, null)
+                                send(yours(QuickAction.TRANSLATE), null)
                             }
                         )
                     }
@@ -1169,8 +1176,8 @@ fun CaptureScreen(
                 voiceAvailable = voiceAvailable,
                 onAsk = { q -> askFromPill(activeAction, q) },
                 onVoice = { listen { q -> askFromPill(activeAction, q) } },
-                onTranslate = { askFromPill(QuickAction.TRANSLATE, null, chat = true) },
-                onExtractText = { askFromPill(QuickAction.COPY_TEXT, null, chat = true) }
+                onTranslate = { askFromPill(yours(QuickAction.TRANSLATE), null, chat = true) },
+                onExtractText = { askFromPill(yours(QuickAction.COPY_TEXT), null, chat = true) }
             )
             }
         }
@@ -1183,6 +1190,7 @@ fun CaptureScreen(
                     thumbnail = thumbnail,
                     queryText = selectedText,
                     activeAction = activeAction,
+                    actions = settings.quickActions,
                     awaitingConfirmation = awaitingConfirmation,
                     preparing = preparing,
                     providerLabel = providerLabel,
@@ -1199,12 +1207,16 @@ fun CaptureScreen(
                     attachments = pendingAttachments.toList(),
                     attachmentImage = attachmentImage,
                     canAttach = resultTab == ResultTab.Chat,
+                    // Image models are offered too: picked, they make a picture of what is typed.
                     models = settings.profiles.flatMap { p ->
-                        p.allModels.filterNot { p.isImageOnly(it) }.map { ModelChoice(p.id, p.displayName, it) }
+                        p.allModels.map { ModelChoice(p.id, p.displayName, it, makesPictures = p.isImageOnly(it)) }
                     },
                     currentModel = (settings.profiles.firstOrNull { it.id == settings.activeProfileId }
                         ?: settings.profiles.firstOrNull())
-                        ?.let { p -> p.modelId.takeIf(String::isNotBlank)?.let { ModelChoice(p.id, p.displayName, it) } },
+                        ?.let { p ->
+                            p.modelId.takeIf(String::isNotBlank)
+                                ?.let { ModelChoice(p.id, p.displayName, it, makesPictures = p.isImageOnly(it)) }
+                        },
                     images = images,
                     imagesEnabled = remember(settings) { ServiceLocator.settings.imageModel() != null }
                 ),
@@ -1224,6 +1236,7 @@ fun CaptureScreen(
                 onPreviewImage = { previewImage = it },
                 onSelectModel = { choice -> ServiceLocator.settings.selectModel(choice.profileId, choice.model) },
                 onRetryImage = onRetryImage,
+                onChooseImageModel = { choosingImageModel = true },
                 onTabSelected = { tab ->
                     resultTab = tab
                     if (readyToAsk) {
@@ -1363,6 +1376,13 @@ fun CaptureScreen(
         }
 
         previewImage?.let { image -> ImagePreview(image, onClose = { previewImage = null }) }
+        if (choosingImageModel) {
+            dev.lenshift.app.ui.settings.ImageModelPicker(
+                settings = settings,
+                onDismiss = { choosingImageModel = false },
+                onChosen = { onImageModelChosen() }
+            )
+        }
     }
 }
 

@@ -9,10 +9,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -32,31 +37,41 @@ fun imageModelLabel(settings: AppSettings): String? {
 }
 
 /**
- * Picks the model that makes pictures for answers: any saved model, of any provider,
- * tagged as creating images (by its provider's model list, Lenshift's table, or the
- * model's "Creates images" setting). "Off" turns pictures off.
+ * Picks the model that makes the pictures chats ask for: any saved model of any provider
+ * that can make images (picture models first), or one typed in. Whatever is picked is
+ * saved to its provider and marked as making pictures, so nothing needs tagging first.
+ * [onChosen] runs after a choice is saved.
  */
 @Composable
-fun ImageModelPicker(settings: AppSettings, onDismiss: () -> Unit) {
-    val candidates = settings.profiles.flatMap { p -> p.allModels.filter { p.createsImages(it) }.map { p to it } }
+fun ImageModelPicker(settings: AppSettings, onDismiss: () -> Unit, onChosen: (ModelRef?) -> Unit = {}) {
+    val providers = settings.profiles.filter { it.protocol.canCreateImages }
+    var adding by remember { mutableStateOf(false) }
+    var addProvider by remember { mutableStateOf(providers.firstOrNull()?.id) }
+    var addModel by remember { mutableStateOf("") }
+
     fun choose(ref: ModelRef?) {
         ServiceLocator.settings.setImageModel(ref)
+        onChosen(ref)
         onDismiss()
     }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Image generation") },
+        title = { Text("Image model") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    "Answers can ask this model for pictures that can't be drawn exactly. Each picture is a " +
-                        "separate request to the model's provider, which bills it.",
+                    "Ask for a picture in any chat, like “make an image of…” or “turn this into a sketch”. " +
+                        "Your chat model hands the request to this model and the picture appears in the answer. " +
+                        "Each picture is a separate request, billed by this model's provider.",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Choice("Off", null, selected = settings.imageModel == null) { choose(null) }
-                candidates.groupBy { it.first.id }.values.forEach { group ->
-                    val profile = group.first().first
+                Choice("Off", "Chats can't make pictures", selected = settings.imageModel == null) { choose(null) }
+                providers.forEach { profile ->
+                    // Picture models first; the rest can still be picked, which marks them.
+                    val models = profile.allModels.sortedByDescending { profile.createsImages(it) }
+                    if (models.isEmpty()) return@forEach
                     Text(
                         profile.displayName,
                         fontSize = 12.sp,
@@ -64,22 +79,47 @@ fun ImageModelPicker(settings: AppSettings, onDismiss: () -> Unit) {
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(top = 12.dp, bottom = 2.dp)
                     )
-                    group.forEach { (p, model) ->
+                    models.forEach { model ->
+                        val makesPictures = profile.createsImages(model)
                         Choice(
                             model,
-                            p.specFor(model)?.summary(),
-                            selected = settings.imageModel == ModelRef(p.id, model)
-                        ) { choose(ModelRef(p.id, model)) }
+                            if (makesPictures) profile.specFor(model)?.summary()?.takeIf { it.isNotBlank() } ?: "Makes pictures"
+                            else "Not marked as making pictures",
+                            selected = settings.imageModel == ModelRef(profile.id, model)
+                        ) { choose(ModelRef(profile.id, model)) }
                     }
                 }
-                if (candidates.isEmpty()) {
-                    Text(
-                        "No saved model is marked as creating images yet. Open a provider and add one marked " +
-                            "“creates images” from its Models list (on OpenRouter, for example " +
-                            "google/gemini-2.5-flash-image), or set “Creates images” to Yes in a model's settings.",
+                when {
+                    providers.isEmpty() -> Text(
+                        "None of your providers can make pictures. Add an OpenAI-compatible or Gemini provider " +
+                            "(OpenRouter's google/gemini-2.5-flash-image works); Anthropic and Ollama can't.",
                         fontSize = 13.sp,
                         modifier = Modifier.padding(top = 12.dp)
                     )
+                    !adding -> TextButton(onClick = { adding = true }, modifier = Modifier.padding(top = 4.dp)) {
+                        Text("Use a model that isn't listed")
+                    }
+                    else -> Column(Modifier.padding(top = 8.dp)) {
+                        if (providers.size > 1) {
+                            ChipRow(
+                                options = providers.map { it.id to it.displayName },
+                                selectedId = addProvider.orEmpty(),
+                                onSelect = { addProvider = it }
+                            )
+                        }
+                        OutlinedTextField(
+                            value = addModel,
+                            onValueChange = { addModel = it },
+                            label = { Text("Model id", fontSize = 12.sp) },
+                            placeholder = { Text("gpt-image-1", fontSize = 12.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        TextButton(
+                            onClick = { addProvider?.let { choose(ModelRef(it, addModel.trim())) } },
+                            enabled = addModel.isNotBlank() && addProvider != null
+                        ) { Text("Use this model") }
+                    }
                 }
             }
         },

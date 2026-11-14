@@ -120,8 +120,11 @@ import dev.lenshift.app.data.settings.QuickAction
 import dev.lenshift.app.ui.markdown.MarkdownText
 import dev.lenshift.app.ui.theme.AssistantCaptureColors
 
-/** One saved model of one provider, as offered in the chat's model picker. */
-data class ModelChoice(val profileId: String, val providerName: String, val model: String) {
+/**
+ * One saved model of one provider, as offered in the chat's model picker. [makesPictures]:
+ * an image model, which makes a picture of what the user types instead of answering.
+ */
+data class ModelChoice(val profileId: String, val providerName: String, val model: String, val makesPictures: Boolean = false) {
     /** The part after any vendor prefix ("openai/gpt-4o" shows as "gpt-4o"). */
     val shortName: String get() = model.substringAfterLast('/')
 }
@@ -133,6 +136,8 @@ data class SearchSheetState(
     /** Selected screen text being searched, shown as the query in place of a thumbnail. */
     val queryText: String?,
     val activeAction: QuickAction,
+    /** The user's actions, offered as chips in this order. */
+    val actions: List<QuickAction> = QuickAction.STOCK,
     /** A selection exists but nothing was sent because the user asked to confirm first. */
     val awaitingConfirmation: Boolean,
     /** The selection is being cropped and read before the request starts. */
@@ -198,6 +203,8 @@ fun SearchSheet(
     onSelectModel: (ModelChoice) -> Unit = {},
     /** Makes a failed picture again. */
     onRetryImage: (ImageKey) -> Unit = {},
+    /** Opens the image model picker, for pictures waiting on one. */
+    onChooseImageModel: () -> Unit = {},
     googleContent: @Composable () -> Unit = {}
 ) {
     val conversation = state.conversation
@@ -349,6 +356,7 @@ fun SearchSheet(
                 ) {
                   Column {
                     QuickActionChips(
+                        actions = state.actions,
                         selected = state.activeAction,
                         onSelect = onActionSelected,
                         horizontalPadding = if (wide) 32.dp else 20.dp,
@@ -365,7 +373,8 @@ fun SearchSheet(
                         onRetry = onRetry,
                         onNewChat = onNewChat,
                         onPreviewImage = onPreviewImage,
-                        onRetryImage = onRetryImage
+                        onRetryImage = onRetryImage,
+                        onChooseImageModel = onChooseImageModel
                     )
                   }
                 }
@@ -605,6 +614,7 @@ private fun ResultTabsRow(
 /** Lenshift's quick actions, offered as chips inside the Chat tab. */
 @Composable
 private fun QuickActionChips(
+    actions: List<QuickAction>,
     selected: QuickAction,
     onSelect: (QuickAction) -> Unit,
     horizontalPadding: Dp,
@@ -621,8 +631,8 @@ private fun QuickActionChips(
     ) {
         if (models.isNotEmpty()) ModelPickerChip(models, currentModel, onSelectModel)
         // Optional shortcuts; "no action" is the absence of a chip, not a chip of its own.
-        QuickAction.entries.filter { it != QuickAction.ASK }.forEach { action ->
-            val isSelected = action == selected
+        actions.forEach { action ->
+            val isSelected = action.id == selected.id
             Box(
                 modifier = Modifier
                     .height(36.dp)
@@ -652,7 +662,8 @@ private fun ResultsBody(
     onRetry: () -> Unit,
     onNewChat: () -> Unit,
     onPreviewImage: (Bitmap) -> Unit,
-    onRetryImage: (ImageKey) -> Unit
+    onRetryImage: (ImageKey) -> Unit,
+    onChooseImageModel: () -> Unit
 ) {
     val conversation = state.conversation
     val phase = conversation.phase
@@ -666,12 +677,13 @@ private fun ResultsBody(
                 is TurnImage.Pending -> ImageCardState.Pending
                 is TurnImage.Ready -> state.attachmentImage(image.id)?.let { ImageCardState.Ready(it, image.model) }
                     ?: ImageCardState.Failed("The picture is no longer available.")
-                is TurnImage.Failed -> ImageCardState.Failed(image.message)
+                is TurnImage.Failed -> ImageCardState.Failed(image.message, image.needsModel)
             }
         },
         onPreview = onPreviewImage,
         onRetry = { index -> onRetryImage(ImageKey(turn, index)) },
-        imagesEnabled = state.imagesEnabled
+        imagesEnabled = state.imagesEnabled,
+        onChooseImageModel = onChooseImageModel
     )
     val listState = rememberLazyListState()
 
@@ -939,10 +951,11 @@ private fun AssistantTurn(
             modifier = Modifier.padding(top = 4.dp).offset(x = (-12).dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { onCopy(answer) }) {
+            // Copy and Share take what is shown, without code a relay leaked into the answer.
+            IconButton(onClick = { onCopy(dev.lenshift.app.ai.LeakedToolCode.strip(answer)) }) {
                 Icon(Icons.Outlined.ContentCopy, "Copy", tint = AssistantCaptureColors.Muted)
             }
-            IconButton(onClick = { onShare(answer) }) {
+            IconButton(onClick = { onShare(dev.lenshift.app.ai.LeakedToolCode.strip(answer)) }) {
                 Icon(Icons.Outlined.Share, "Share", tint = AssistantCaptureColors.Muted)
             }
             if (isLatest) {
@@ -1080,16 +1093,21 @@ private fun ModelPickerChip(
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp)
                 )
                 choices.forEach { choice ->
-                    val selected = choice == current
+                    val selected = current != null && choice.profileId == current.profileId && choice.model == current.model
                     DropdownMenuItem(
                         text = {
-                            Text(
-                                choice.model,
-                                color = AssistantCaptureColors.Text,
-                                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Column {
+                                Text(
+                                    choice.model,
+                                    color = AssistantCaptureColors.Text,
+                                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (choice.makesPictures) {
+                                    Text("Makes pictures of what you type", fontSize = 12.sp, color = AssistantCaptureColors.Muted)
+                                }
+                            }
                         },
                         trailingIcon = {
                             if (selected) Icon(Icons.Outlined.Check, contentDescription = "Current", tint = AssistantCaptureColors.Accent)

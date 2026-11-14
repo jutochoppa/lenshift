@@ -89,13 +89,7 @@ class OpenAiResponsesAdapter : BaseAdapter() {
         }
         if (request.capabilities.accepts(ModelSpec.TOP_P)) profile.topP?.let { body.put("top_p", it.toDouble()) }
 
-        ReasoningMapper.applyOpenAiResponses(body, request.reasoningMode, request.capabilities)
-
-        if (profile.reasoningMode != dev.lenshift.app.ai.ReasoningMode.AUTO &&
-            request.reasoningMode != dev.lenshift.app.ai.ReasoningMode.AUTO
-        ) {
-            body.put("reasoning_summary", "auto")
-        }
+        ReasoningMapper.applyOpenAiResponses(body, request.reasoningMode, request.capabilities, profile.customReasoning.selected)
 
         request.continuationToken?.let { body.put("previous_response_id", it) }
 
@@ -147,6 +141,11 @@ class OpenAiResponsesAdapter : BaseAdapter() {
                     items.put(
                         JSONObject().put("role", role).put("content", content)
                     )
+                } else if (message.role == ChatMessage.Role.ASSISTANT) {
+                    // An earlier answer goes back as plain text. Typed parts would have to be
+                    // output_text, and as output items those also need the id and status of a
+                    // stored response, which store = false never creates.
+                    items.put(JSONObject().put("role", role).put("content", message.text))
                 } else {
                     items.put(
                         JSONObject()

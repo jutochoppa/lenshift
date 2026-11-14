@@ -42,6 +42,8 @@ data class ProviderProfile(
     // ---- reasoning -----------------------------------------------------------
     val reasoningMode: ReasoningMode = ReasoningMode.AUTO,
     val reasoningTokenBudget: Int? = null,
+    /** The user's own reasoning levels for the current model, and which one is picked. */
+    val customReasoning: CustomReasoning = CustomReasoning(),
 
     // ---- images --------------------------------------------------------------
     val imageDetail: ImageDetail = ImageDetail.AUTO,
@@ -97,6 +99,7 @@ data class ProviderProfile(
             contextWindowOverride = contextWindowOverride,
             reasoningMode = reasoningMode,
             reasoningTokenBudget = reasoningTokenBudget,
+            customReasoning = customReasoning,
             visionOverride = visionOverride,
             reasoningOverride = reasoningOverride,
             mechanismOverride = mechanismOverride,
@@ -176,6 +179,7 @@ data class ProviderProfile(
         contextWindowOverride = settings.contextWindowOverride,
         reasoningMode = settings.reasoningMode,
         reasoningTokenBudget = settings.reasoningTokenBudget,
+        customReasoning = settings.customReasoning,
         visionOverride = settings.visionOverride,
         reasoningOverride = settings.reasoningOverride,
         mechanismOverride = settings.mechanismOverride,
@@ -192,8 +196,22 @@ data class ProviderProfile(
         }
     }
 
-    /** Image-only models (DALL·E, gpt-image) cannot answer questions, so the chat skips them. */
+    /**
+     * Image-only models (DALL·E, gpt-image) cannot answer questions: picked in the chat,
+     * they make a picture of what the user types.
+     */
     fun isImageOnly(model: String): Boolean = createsImages(model) && specFor(model)?.textOutput == Tri.NO
+
+    /** [model] saved here (added if new) and marked as creating images, unless already known to. */
+    fun markingCreatesImages(model: String): ProviderProfile {
+        val saved = withModel(model)
+        if (saved.createsImages(model)) return saved
+        return if (model == saved.modelId) {
+            saved.copy(imageOutputOverride = Tri.YES)
+        } else {
+            saved.copy(modelSettings = saved.modelSettings + (model to saved.settingsFor(model).copy(imageOutputOverride = Tri.YES)))
+        }
+    }
 
     /** The URL actually used for a request, tolerating a trailing slash. */
     fun normalizedBase(): String = baseUrl.trim().trimEnd('/')
@@ -213,10 +231,26 @@ data class ModelSettings(
     val contextWindowOverride: Int? = null,
     val reasoningMode: ReasoningMode = ReasoningMode.AUTO,
     val reasoningTokenBudget: Int? = null,
+    val customReasoning: CustomReasoning = CustomReasoning(),
     val visionOverride: Tri = Tri.UNKNOWN,
     val reasoningOverride: Tri = Tri.UNKNOWN,
     val mechanismOverride: ReasoningMechanism? = null,
     val imageOutputOverride: Tri = Tri.UNKNOWN
+)
+
+/**
+ * A model's reasoning levels as the user edited them: built-in levels they deleted, levels
+ * of their own (any value the model takes, such as "min", "standard" or "extended"), and
+ * the one of their own that is picked. A picked value is sent exactly as written and
+ * replaces the built-in level.
+ */
+data class CustomReasoning(
+    /** One of [added], sent as written; null uses the built-in level. */
+    val selected: String? = null,
+    /** The user's own levels, in the order added. */
+    val added: List<String> = emptyList(),
+    /** Ids of built-in levels the user deleted ("low", "minimal", …). */
+    val hidden: Set<String> = emptySet()
 )
 
 enum class ImageDetail(val id: String, val label: String) {

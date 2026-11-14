@@ -101,13 +101,15 @@ object HttpSupport {
         val registration = CallRegistry.register(call)
         val response = try {
             call.execute()
-        } catch (e: SocketTimeoutException) {
-            throw AiError.Timeout("The provider did not respond in ${profile.timeoutMs} ms")
-        } catch (e: UnknownHostException) {
-            throw AiError.Network("Could not resolve '${e.message}'")
-        } catch (e: SSLException) {
-            throw AiError.Network("TLS handshake failed: ${e.message}", e)
         } catch (e: IOException) {
+            // A call cut short by Stop is not a provider failure; only real ones are logged.
+            if (!call.isCanceled()) ProviderLog.transportError(profile, request, e)
+            when (e) {
+                is SocketTimeoutException ->
+                    throw AiError.Timeout("The provider did not respond in ${profile.timeoutMs} ms")
+                is UnknownHostException -> throw AiError.Network("Could not resolve '${e.message}'")
+                is SSLException -> throw AiError.Network("TLS handshake failed: ${e.message}", e)
+            }
             if (call.isCanceled()) {
                 throw kotlinx.coroutines.CancellationException("Request cancelled")
             }
@@ -118,6 +120,7 @@ object HttpSupport {
 
         if (!response.isSuccessful) {
             val body = runCatching { response.body?.string() }.getOrNull()
+            ProviderLog.httpError(profile, request, response.code, response.message, response.headers, body)
             val detail = extractErrorDetail(body) ?: response.message.ifBlank { "HTTP ${response.code}" }
             val error = when (response.code) {
                 401, 403 -> AiError.Auth(detail)

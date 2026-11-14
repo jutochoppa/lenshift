@@ -53,14 +53,17 @@ class AnswerVisuals(
     val onPreview: (Bitmap) -> Unit,
     val onRetry: (index: Int) -> Unit,
     /** False when no image model is chosen, so blocks say why nothing was made. */
-    val imagesEnabled: Boolean
+    val imagesEnabled: Boolean,
+    /** Opens the image model picker; null where it can't be offered. */
+    val onChooseImageModel: (() -> Unit)? = null
 )
 
 /** One generated image as the answer shows it. */
 sealed interface ImageCardState {
     data object Pending : ImageCardState
     data class Ready(val bitmap: Bitmap, val model: String) : ImageCardState
-    data class Failed(val message: String) : ImageCardState
+    /** [needsModel]: nothing was tried yet, because no image model is chosen. */
+    data class Failed(val message: String, val needsModel: Boolean = false) : ImageCardState
 }
 
 /**
@@ -96,10 +99,20 @@ fun GeneratedImageBlock(source: String, complete: Boolean, index: Int, visuals: 
                     Waiting("Creating image…", ratio)
                     Caption(request.prompt, null)
                 }
+                state is ImageCardState.Failed && state.needsModel -> Notice(
+                    "Choose an image model to make this picture",
+                    request.prompt,
+                    hint = "Your chat model wrote the request; the image model makes the picture.",
+                    actions = listOfNotNull(
+                        visuals.onChooseImageModel?.let { choose -> "Choose image model" to choose },
+                        "Try again" to { visuals.onRetry(index) }
+                    ),
+                    error = false
+                )
                 state is ImageCardState.Failed -> Notice(
                     "Couldn't create the image: ${state.message}",
                     request.prompt,
-                    action = "Retry" to { visuals.onRetry(index) }
+                    actions = listOf("Retry" to { visuals.onRetry(index) })
                 )
                 else -> Notice(
                     "Image idea",
@@ -170,24 +183,32 @@ private fun Caption(prompt: String, model: String?) {
 }
 
 @Composable
-private fun Notice(title: String, prompt: String, hint: String? = null, action: Pair<String, () -> Unit>? = null) {
+private fun Notice(
+    title: String,
+    prompt: String,
+    hint: String? = null,
+    actions: List<Pair<String, () -> Unit>> = emptyList(),
+    error: Boolean = actions.isNotEmpty()
+) {
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = if (action == null) 12.dp else 2.dp),
+            .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = if (actions.isEmpty()) 12.dp else 2.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.Image, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text(title, fontSize = 14.sp, color = if (action != null) AssistantCaptureColors.Error else MaterialTheme.colorScheme.onSurface)
+            Text(title, fontSize = 14.sp, color = if (error) AssistantCaptureColors.Error else MaterialTheme.colorScheme.onSurface)
         }
         Text(prompt, fontSize = 13.sp, lineHeight = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         hint?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        action?.let { (label, onClick) ->
-            TextButton(onClick = onClick) { Text(label) }
+        if (actions.isNotEmpty()) {
+            Row {
+                actions.forEach { (label, onClick) -> TextButton(onClick = onClick) { Text(label) } }
+            }
         }
     }
 }

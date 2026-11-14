@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import dev.lenshift.app.ai.transport.CallRegistry
 import dev.lenshift.app.ai.transport.ImageEncoder
+import dev.lenshift.app.ai.transport.ProviderLog
 import dev.lenshift.app.visual.ImageBlocks
 import java.util.concurrent.ConcurrentHashMap
 
@@ -79,6 +80,9 @@ class ConversationController(
     /** The question shown for the turn in flight. */
     private var pendingQuestion = ""
 
+    /** What the user asked for the turn in flight: typed text, or the action's prompt. */
+    private var pendingPrompt = ""
+
     // Images of this thread by id: attached by the user, or made by the image model.
     private val attachmentImages = ConcurrentHashMap<String, Bitmap>()
     private val savedAttachments = ConcurrentHashMap.newKeySet<String>()
@@ -90,6 +94,9 @@ class ConversationController(
     val images: StateFlow<Map<ImageKey, TurnImage>> = _images.asStateFlow()
     private val imageJobs = ConcurrentHashMap<ImageKey, Job>()
     private val imageRequests = ConcurrentHashMap<ImageKey, ImageBlocks.Request>()
+
+    /** Pictures asked of the chat's own model (an image model picked in the chat), so a retry goes back to it. */
+    private val directModels = ConcurrentHashMap<ImageKey, ImageModel>()
     private var pendingAttachmentIds: List<String> = emptyList()
 
     /** An attached image of the current thread, for display. */
@@ -143,6 +150,7 @@ class ConversationController(
         turns = emptyList()
         // A blank Ask shows just the selection, with no text bubble.
         pendingQuestion = typed ?: if (action.prompt.isBlank()) "" else action.label
+        pendingPrompt = question
 
         _state.value = ConversationState(
             phase = ConversationPhase.Idle,
@@ -175,6 +183,7 @@ class ConversationController(
         }
         pendingAttachmentIds = register(attachments)
         pendingQuestion = display.trim()
+        pendingPrompt = question.trim()
         _state.value = _state.value.copy(
             phase = ConversationPhase.Idle,
             question = pendingQuestion,
@@ -256,7 +265,7 @@ class ConversationController(
         _state.value = ConversationState(
             phase = ConversationPhase.Complete(thread.turns.last().answer),
             question = pendingQuestion,
-            action = dev.lenshift.app.data.settings.QuickAction.fromId(thread.actionId),
+            action = settings.current.action(thread.actionId) ?: QuickAction.stock(thread.actionId) ?: QuickAction.ASK,
             hasImage = thread.hasImage,
             modelLabel = thread.modelLabel,
             threadId = thread.id,
@@ -364,6 +373,12 @@ class ConversationController(
             return
         }
 
+        // An image model picked in the chat makes a picture of what the user asked for.
+        if (profile.isImageOnly(profile.modelId)) {
+            makePictureDirectly(profile, active.apiKey)
+            return
+        }
+
         // Text-only models must not receive an image part; PromptBuilder already told the
         // model no image is attached, so drop it here rather than silently discarding.
         val visionAllowed = active.capabilities.vision != dev.lenshift.app.ai.Tri.NO
@@ -376,10 +391,11 @@ class ConversationController(
             )
         }
 
-        // The selection image rides on the first user turn (see startFresh).
+        // The selection image rides on the first user turn (see startFresh). Pictures are
+        // always offered: without an image model, the answer says how to choose one.
         val visuals = PromptBuilder.visualInstructions(
             graphs = settings.current.graphsEnabled,
-            images = settings.imageModel() != null
+            images = true
         )
         val messages = (if (visionAllowed) history else history.map { it.copy(images = emptyList()) }).mapIndexed { i, m ->
             if (i == 0 && m.role == ChatMessage.Role.SYSTEM && visuals.isNotEmpty()) m.copy(text = m.text + "\n\n" + visuals) else m
@@ -467,16 +483,14 @@ class ConversationController(
                 if (!current()) return@launch
                 if (finalText.isBlank()) {
                     val starved = reasoning.isNotEmpty()
-                    _state.value = _state.value.copy(
-                        phase = ConversationPhase.Failed(
-                            if (starved) {
-                                "The model produced reasoning but no answer. Raise the " +
-                                    "maximum output tokens or lower the reasoning effort."
-                            } else {
-                                "The provider returned an empty answer."
-                            }
-                        )
-                    )
+                    val message = if (starved) {
+                        "The model produced reasoning but no answer. Raise the " +
+                            "maximum output tokens or lower the reasoning effort."
+                    } else {
+                        "The provider returned an empty answer."
+                    }
+                    ProviderLog.failed("chat", profile, message)
+                    _state.value = _state.value.copy(phase = ConversationPhase.Failed(message))
                     return@launch
                 }
 
@@ -503,11 +517,13 @@ class ConversationController(
                 throw e
             } catch (e: AiError) {
                 android.util.Log.w(TAG, "Provider error: ${e::class.simpleName}", e)
+                ProviderLog.failed("chat", profile, describe(e))
                 if (current()) {
                     _state.value = _state.value.copy(phase = ConversationPhase.Failed(describe(e)))
                 }
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Unexpected failure", e)
+                ProviderLog.failed("chat", profile, e.message ?: "Unexpected error", e)
                 if (current()) {
                     _state.value = _state.value.copy(
                         phase = ConversationPhase.Failed(e.message ?: "Unexpected error")
@@ -524,16 +540,56 @@ class ConversationController(
 
     // ------------------------------------------------------------------ pictures
 
-    /** Retries a picture that failed, or makes it again. */
+    /** Retries a picture that failed, or makes it again, with the model that was asked. */
     fun retryImage(key: ImageKey) {
         val request = imageRequests[key] ?: return
         imageJobs.remove(key)?.cancel()
-        val model = settings.imageModel()
+        val model = directModels[key] ?: settings.imageModel()
         if (model == null) {
-            setImage(key, TurnImage.Failed(request.prompt, "No image model is chosen in settings."))
+            setImage(key, TurnImage.Failed(request.prompt, NO_IMAGE_MODEL, needsModel = true))
             return
         }
         makeImage(key, request, model.first, model.second)
+    }
+
+    /** Makes the pictures that were waiting for an image model, once one is chosen. */
+    fun retryImagesNeedingModel() {
+        if (settings.imageModel() == null) return
+        _images.value.filterValues { it is TurnImage.Failed && it.needsModel }.keys.forEach(::retryImage)
+    }
+
+    /**
+     * The chat's model is an image model: the turn's answer is a picture of what the user
+     * asked for, made with that model. It edits the user's own attachments if they added
+     * any, else the previous picture in a follow-up, else what they selected.
+     */
+    private fun makePictureDirectly(profile: ProviderProfile, apiKey: String?) {
+        val turnIndex = turns.size
+        val previous = _images.value.any { it.value is TurnImage.Ready }
+        val answer = PictureTurns.answer(
+            prompt = pendingPrompt,
+            input = PictureTurns.input(
+                attached = pendingAttachmentIds.isNotEmpty(),
+                previous = previous,
+                selection = turnIndex == 0 && threadImage != null
+            )
+        )
+        if (answer == null) {
+            _state.value = _state.value.copy(
+                phase = ConversationPhase.Failed("${profile.modelId} makes pictures: type what the picture should show.")
+            )
+            return
+        }
+        history = history + ChatMessage(ChatMessage.Role.ASSISTANT, answer)
+        turns = turns + ChatTurn(pendingQuestion, answer, null, pendingAttachmentIds)
+        _state.value = _state.value.copy(
+            phase = ConversationPhase.Complete(answer),
+            modelLabel = profile.modelId,
+            providerLabel = profile.displayName,
+            turns = turns
+        )
+        startImages(turnIndex, answer, final = true, direct = profile to apiKey)
+        persist()
     }
 
     /** Stops everything, including pictures being made; the overlay is going away. */
@@ -546,21 +602,21 @@ class ConversationController(
      * Starts a picture for every closed ```image block of answer [turn] not started yet
      * (every block once the answer is [final]), up to [MAX_IMAGES] per answer.
      */
-    private fun startImages(turn: Int, answer: String, final: Boolean) {
-        val model = settings.imageModel() ?: return
+    private fun startImages(turn: Int, answer: String, final: Boolean, direct: ImageModel? = null) {
+        val model = direct ?: settings.imageModel()
         for (block in ImageBlocks.find(answer)) {
             if (!block.complete && !final) continue
             val key = ImageKey(turn, block.index)
             if (imageRequests.putIfAbsent(key, block) != null) continue
-            if (block.index >= MAX_IMAGES) {
-                setImage(key, TurnImage.Failed(block.prompt, "Only $MAX_IMAGES pictures are made per answer."))
-                continue
+            if (direct != null) directModels[key] = direct
+            when {
+                block.index >= MAX_IMAGES ->
+                    setImage(key, TurnImage.Failed(block.prompt, "Only $MAX_IMAGES pictures are made per answer."))
+                block.prompt.isBlank() -> setImage(key, TurnImage.Failed(block.prompt, "The picture has no description."))
+                // Kept with the request, so choosing a model and tapping Try again makes it.
+                model == null -> setImage(key, TurnImage.Failed(block.prompt, NO_IMAGE_MODEL, needsModel = true))
+                else -> makeImage(key, block, model.first, model.second)
             }
-            if (block.prompt.isBlank()) {
-                setImage(key, TurnImage.Failed(block.prompt, "The picture has no description."))
-                continue
-            }
-            makeImage(key, block, model.first, model.second)
         }
     }
 
@@ -572,6 +628,7 @@ class ConversationController(
                 val inputs = when (block.input) {
                     "selection" -> listOfNotNull(threadImage)
                     "previous" -> listOfNotNull(previousImage(key))
+                    "attached" -> turns.getOrNull(key.turn)?.attachments.orEmpty().mapNotNull { attachmentImages[it] }
                     else -> emptyList()
                 }.map { bitmap ->
                     val encoded = ImageEncoder.encode(bitmap, maxEdgePx = 1536, jpegQuality = 90, detail = ImageDetail.AUTO)
@@ -587,9 +644,11 @@ class ConversationController(
                 throw e
             } catch (e: AiError) {
                 android.util.Log.w(TAG, "Image failed: ${e::class.simpleName}", e)
+                ProviderLog.failed("image", profile, describe(e))
                 setImage(key, TurnImage.Failed(block.prompt, describe(e)))
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Image failed", e)
+                ProviderLog.failed("image", profile, e.message ?: "Something went wrong.", e)
                 setImage(key, TurnImage.Failed(block.prompt, e.message ?: "Something went wrong."))
             }
         }
@@ -611,6 +670,7 @@ class ConversationController(
     private fun cancelImages(which: (ImageKey) -> Boolean) {
         imageJobs.keys.filter(which).forEach { imageJobs.remove(it)?.cancel() }
         imageRequests.keys.removeIf(which)
+        directModels.keys.removeIf(which)
         _images.update { images -> images.filterKeys { !which(it) } }
     }
 
@@ -652,8 +712,12 @@ class ConversationController(
         const val TAG = "Lenshift/Conversation"
         const val MAX_IMAGES = 3
         const val MAX_IMAGE_EDGE = 2048
+        const val NO_IMAGE_MODEL = "Choose an image model to make pictures."
     }
 }
+
+/** A model that makes pictures, ready to call: its provider set to it, and that provider's key. */
+private typealias ImageModel = Pair<ProviderProfile, String?>
 
 // ======================================================================== state
 

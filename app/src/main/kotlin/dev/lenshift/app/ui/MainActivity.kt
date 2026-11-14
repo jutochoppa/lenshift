@@ -14,8 +14,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.lenshift.app.ai.ApiProtocol
-import dev.lenshift.app.capture.CaptureSource
 import dev.lenshift.app.di.ServiceLocator
+import dev.lenshift.app.ui.settings.ActionsScreen
 import dev.lenshift.app.ui.settings.AdvancedSettingsScreen
 import dev.lenshift.app.ui.settings.DiagnosticsScreen
 import dev.lenshift.app.ui.settings.HomeScreen
@@ -36,8 +36,6 @@ import dev.lenshift.app.ui.theme.LenshiftTheme
  */
 class MainActivity : ComponentActivity() {
 
-    private val context get() = this
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -46,8 +44,9 @@ class MainActivity : ComponentActivity() {
             LenshiftTheme {
                 val settings by ServiceLocator.settings.state.collectAsStateWithLifecycle()
 
+                // The app opens on its settings: searching happens in the overlay.
                 var stack by rememberSaveable(stateSaver = ScreenStackSaver) {
-                    mutableStateOf(listOf<Screen>(Screen.Assistant))
+                    mutableStateOf(listOf<Screen>(Screen.Home))
                 }
 
                 BackHandler(enabled = stack.size > 1) {
@@ -59,30 +58,6 @@ class MainActivity : ComponentActivity() {
                     color = androidx.compose.material3.MaterialTheme.colorScheme.background
                 ) {
                     when (val current = stack.last()) {
-                        Screen.Assistant -> AssistantHomeScreen(
-                            settings = settings,
-                            onOpenSettings = { stack = stack + Screen.Home },
-                            onSearch = { query ->
-                                context.startActivity(
-                                    CaptureActivity.intentFor(
-                                        context = context,
-                                        source = CaptureSource.NONE,
-                                        preloadedText = null,
-                                        mechanism = "assistant_search"
-                                    ).putExtra(CaptureActivity.EXTRA_TEXT, query.takeIf { it.isNotBlank() })
-                                )
-                            },
-                            onQuickAction = { action ->
-                                context.startActivity(
-                                    CaptureActivity.intentFor(
-                                        context = context,
-                                        source = CaptureSource.NONE,
-                                        mechanism = "assistant_quick_action"
-                                    ).putExtra(CaptureActivity.EXTRA_DEFAULT_ACTION, action.id)
-                                )
-                            }
-                        )
-
                         Screen.Home -> HomeScreen(
                             settings = settings,
                             onNavigate = { stack = stack + it }
@@ -107,6 +82,11 @@ class MainActivity : ComponentActivity() {
                             onBack = { stack = stack.dropLast(1) }
                         )
 
+                        Screen.Actions -> ActionsScreen(
+                            settings = settings,
+                            onBack = { stack = stack.dropLast(1) }
+                        )
+
                         Screen.Diagnostics -> DiagnosticsScreen(
                             onBack = { stack = stack.dropLast(1) }
                         )
@@ -122,7 +102,6 @@ class MainActivity : ComponentActivity() {
 }
 
 sealed interface Screen {
-    data object Assistant : Screen
     data object Home : Screen
     data object Providers : Screen
     data class ProviderEditor(
@@ -130,6 +109,7 @@ sealed interface Screen {
         val protocol: ApiProtocol? = null
     ) : Screen
     data object Advanced : Screen
+    data object Actions : Screen
     data object Diagnostics : Screen
     data object Privacy : Screen
 }
@@ -142,24 +122,25 @@ sealed interface Screen {
  */
 private val ScreenStackSaver = listSaver<List<Screen>, String>(
     save = { stack -> stack.map { it.encode() } },
-    restore = { saved -> saved.mapNotNull { decodeScreen(it) }.ifEmpty { listOf(Screen.Assistant) } }
+    // The old search-bar home ("assistant") no longer exists, so a saved stack drops it.
+    restore = { saved -> saved.mapNotNull { decodeScreen(it) }.ifEmpty { listOf(Screen.Home) } }
 )
 
 private fun Screen.encode(): String = when (this) {
-    Screen.Assistant -> "assistant"
     Screen.Home -> "home"
     Screen.Providers -> "providers"
     Screen.Advanced -> "advanced"
+    Screen.Actions -> "actions"
     Screen.Diagnostics -> "diagnostics"
     Screen.Privacy -> "privacy"
     is Screen.ProviderEditor -> "editor\u001f${profileId.orEmpty()}\u001f${protocol?.id.orEmpty()}"
 }
 
 private fun decodeScreen(raw: String): Screen? {
-    if (raw == "assistant") return Screen.Assistant
     if (raw == "home") return Screen.Home
     if (raw == "providers") return Screen.Providers
     if (raw == "advanced") return Screen.Advanced
+    if (raw == "actions") return Screen.Actions
     if (raw == "diagnostics") return Screen.Diagnostics
     if (raw == "privacy") return Screen.Privacy
     if (!raw.startsWith("editor\u001f")) return null

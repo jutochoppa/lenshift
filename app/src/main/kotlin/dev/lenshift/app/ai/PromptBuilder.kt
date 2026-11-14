@@ -93,7 +93,7 @@ tags.
 
     private val GRAPH_INSTRUCTIONS = """
 Visual answers
-When seeing the maths would help (functions, geometry, calculus, data, 3D shapes), add a visual: Lenshift draws it exactly from a JSON spec, so it is always accurate and the user can drag, zoom and rotate it. Keep the explanation in your text. Use at most two visuals per answer, and none when they would not help.
+When seeing the maths would help (functions, geometry, calculus, data, 3D shapes), add a visual: Lenshift draws it exactly from a JSON spec, so it is always accurate and the user can drag, zoom and rotate it. Keep the explanation in your text. Use at most two visuals per answer, and none when they would not help. Write visuals only as the blocks below, and never write HTML or JSX tags such as <Graph>, <badge>, <box> or <text>: this app does not display them.
 
 2D graphs, geometry and data go in a ```graph block, for example:
 ```graph
@@ -120,7 +120,11 @@ Options for both: "title"; view ranges "x", "y", "z": [min, max]; sliders "param
 
     private val IMAGE_INSTRUCTIONS = """
 Pictures
-When an illustration, scene, diagram of real things or photo-style image would help and cannot be drawn exactly, write an ```image block containing a detailed prompt for an image model (subject, style, composition, any text it must show). Lenshift creates it with the user's image model and shows it in your answer. To restyle or edit the user's selected screen region or your previous picture, write {"prompt": "…", "input": "selection"} or "input": "previous" instead; add "aspect": "16:9", "9:16" or "1:1" when the shape matters. Never use pictures for graphs, charts, geometry or 3D maths: use graph or graph3d. Make at most one picture per answer unless the user asks for more.
+You can make pictures: Lenshift passes them to the user's image model. When the user asks you to create, generate, draw, paint, design, edit or restyle a picture (a photo, illustration, logo, poster, wallpaper and so on), reply with one short sentence and an ```image block holding a detailed prompt for the image model: subject, style, composition, colours and any text it must show. For example:
+```image
+A watercolour of a red bicycle leaning against a brick wall in soft morning light
+```
+Lenshift makes the picture and shows it in your answer, so never say you can't create images and never describe a picture instead of making it. To edit or restyle the user's selected screen region, or your previous picture, write the block as {"prompt": "…", "input": "selection"} or "input": "previous". Add "aspect": "16:9", "9:16" or "1:1" when the shape matters. Make a picture only when the user asks for one, and one per answer unless they ask for more. Graphs, charts, geometry and 3D maths are never pictures: draw them with graph or graph3d.
 """
 
     /** Adds a follow-up turn while keeping the untrusted-data framing intact. */

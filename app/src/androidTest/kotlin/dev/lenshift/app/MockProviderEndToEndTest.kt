@@ -394,6 +394,7 @@ class MockProviderEndToEndTest {
         assumeTrue(serverUp())
         val models = OpenAiChatAdapter()
             .listModels(profile(ApiProtocol.OPENAI_CHAT, "mock-gpt-4o"), "k")
+            ?.map { it.id }
         assertNotNull(models)
         assertTrue(models!!.contains("mock-gpt-4o"))
         assertTrue(models.contains("openai/gpt-4o-mini"))
@@ -404,6 +405,7 @@ class MockProviderEndToEndTest {
         assumeTrue(serverUp())
         val models = GeminiAdapter()
             .listModels(profile(ApiProtocol.GEMINI, "gemini-2.5-flash"), "k")
+            ?.map { it.id }
         assertNotNull(models)
         assertTrue(models!!.contains("gemini-2.5-flash"))
         assertTrue(

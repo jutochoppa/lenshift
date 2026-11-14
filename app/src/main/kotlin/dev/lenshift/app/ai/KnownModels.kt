@@ -91,7 +91,8 @@ object KnownModels {
         Entry("^gemini-1-5-flash(-8b)?(-\\d{3})?$", spec(1_048_576, 8_192, vision = true, parameters = GEMINI)),
 
         // ---- image generation (limits vary by size, so only the outputs are listed)
-        Entry("^gpt-image-1(-mini)?$", image(text = false, vision = true)),
+        // Every gpt-image variant, including relays' own names ("gpt-image-2.6-sunburst").
+        Entry("^(codex-)?gpt-image(-.*)?$", image(text = false, vision = true)),
         Entry("^dall-e-[23]$", image(text = false, vision = false)),
         Entry("^gemini-.*-image(-preview|-generation)?$", image(text = true, vision = true)),
         Entry("^gemini-2-0-flash-(preview|exp)-image-generation$", image(text = true, vision = true))

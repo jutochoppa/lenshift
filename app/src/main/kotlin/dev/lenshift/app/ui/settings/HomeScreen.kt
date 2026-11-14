@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.sp
 import dev.lenshift.app.activation.AssistantRole
 import dev.lenshift.app.activation.LenshiftTileService
 import dev.lenshift.app.data.settings.AppSettings
-import dev.lenshift.app.data.settings.QuickAction
 import dev.lenshift.app.di.ServiceLocator
 import dev.lenshift.app.ui.AssistLaunchActivity
 import dev.lenshift.app.ui.Screen
@@ -324,9 +323,9 @@ fun HomeScreen(
             SectionHeader("Preferences")
             SettingsCard {
                 SettingRow(
-                    title = "Default action",
-                    subtitle = settings.defaultQuickAction.label,
-                    onClick = { onNavigate(Screen.Advanced) }
+                    title = "Actions",
+                    subtitle = actionsSummary(settings),
+                    onClick = { onNavigate(Screen.Actions) }
                 )
                 SwitchRow(
                     title = "Search as soon as you select",
@@ -408,7 +407,8 @@ fun HomeScreen(
                 var picking by remember { mutableStateOf(false) }
                 SettingRow(
                     title = "Image generation",
-                    subtitle = imageModelLabel(settings) ?: "Off. Choose a model that creates images",
+                    subtitle = imageModelLabel(settings)?.let { "$it · ask for a picture in any chat" }
+                        ?: "Off. Choose the model chats use to make pictures",
                     onClick = { picking = true }
                 )
                 if (picking) ImageModelPicker(settings, onDismiss = { picking = false })

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import dev.lenshift.app.ai.ApiProtocol
+import dev.lenshift.app.ai.CustomReasoning
 import dev.lenshift.app.ai.ImageDetail
 import dev.lenshift.app.ai.ModelSettings
 import dev.lenshift.app.ai.ModelSpec
@@ -66,7 +67,7 @@ class SettingsRepository(context: Context) {
 
     /** The model answers' ```image blocks go to, or null to turn image generation off. */
     fun setImageModel(ref: ModelRef?) {
-        persist(current.copy(imageModel = ref))
+        persist(if (ref == null) current.copy(imageModel = null) else current.usingImageModel(ref))
     }
 
     /**
@@ -121,7 +122,26 @@ class SettingsRepository(context: Context) {
     }
 
     fun setDefaultQuickAction(action: QuickAction) {
-        persist(current.copy(defaultQuickAction = action))
+        persist(current.copy(defaultActionId = action.id))
+    }
+
+    /** Saves an edited action in place, or adds a new one at the end. */
+    fun saveQuickAction(action: QuickAction) {
+        persist(current.withAction(action))
+    }
+
+    fun deleteQuickAction(id: String) {
+        persist(current.withoutAction(id))
+    }
+
+    /** Moves an action [by] places along the chip row. */
+    fun moveQuickAction(id: String, by: Int) {
+        persist(current.movingAction(id, by))
+    }
+
+    /** Adds back the stock actions the user deleted. */
+    fun restoreStockActions() {
+        persist(current.withStockRestored())
     }
 
     fun setRequireConfirmationBeforeSend(require: Boolean) {
@@ -176,8 +196,11 @@ data class AppSettings(
     val profiles: List<ProviderProfile> = emptyList(),
     val activeProfileId: String? = null,
 
-    /** Behaviour when Lenshift opens. */
-    val defaultQuickAction: QuickAction = QuickAction.ASK,
+    /** The actions offered as chips on the selection screen, in order. */
+    val quickActions: List<QuickAction> = QuickAction.STOCK,
+
+    /** The action Send runs with nothing typed; [QuickAction.ASK] lets the model decide. */
+    val defaultActionId: String = QuickAction.ASK.id,
 
     /** When true, nothing leaves the device until the user taps Send. */
     val requireConfirmationBeforeSend: Boolean = false,
@@ -221,10 +244,64 @@ data class AppSettings(
 
     val onboardingComplete: Boolean = false
 ) {
+    /** The default action, or no action once it has been deleted. */
+    val defaultQuickAction: QuickAction get() = action(defaultActionId) ?: QuickAction.ASK
+
+    /** The user's action with [id] ([QuickAction.ASK] for "ask"), or null. */
+    fun action(id: String?): QuickAction? =
+        if (id == QuickAction.ASK.id) QuickAction.ASK else quickActions.firstOrNull { it.id == id }
+
+    /** [action] saved in place, or added at the end. */
+    fun withAction(action: QuickAction): AppSettings {
+        val index = quickActions.indexOfFirst { it.id == action.id }
+        return copy(
+            quickActions = if (index < 0) quickActions + action
+            else quickActions.toMutableList().also { it[index] = action }
+        )
+    }
+
+    /** Without the action [id]; if it was the default, the model decides again. */
+    fun withoutAction(id: String): AppSettings = copy(
+        quickActions = quickActions.filterNot { it.id == id },
+        defaultActionId = if (defaultActionId == id) QuickAction.ASK.id else defaultActionId
+    )
+
+    /** With the action [id] moved [by] places, stopping at either end. */
+    fun movingAction(id: String, by: Int): AppSettings {
+        val from = quickActions.indexOfFirst { it.id == id }
+        if (from < 0) return this
+        val to = (from + by).coerceIn(0, quickActions.lastIndex)
+        if (to == from) return this
+        val list = quickActions.toMutableList()
+        list.add(to, list.removeAt(from))
+        return copy(quickActions = list)
+    }
+
+    /**
+     * [ref] as the image model: saved to its provider if new and marked as creating
+     * images, so any model the user picks (or types) works without tagging it first.
+     */
+    fun usingImageModel(ref: ModelRef): AppSettings {
+        val model = ref.model.trim()
+        if (model.isEmpty() || profiles.none { it.id == ref.profileId }) return this
+        return copy(
+            profiles = profiles.map { if (it.id == ref.profileId) it.markingCreatesImages(model) else it },
+            imageModel = ModelRef(ref.profileId, model)
+        )
+    }
+
+    /** The stock actions the user deleted, as shipped. */
+    val deletedStockActions: List<QuickAction>
+        get() = QuickAction.STOCK.filter { stock -> quickActions.none { it.id == stock.id } }
+
+    /** With the deleted stock actions added back after the user's own. */
+    fun withStockRestored(): AppSettings = copy(quickActions = quickActions + deletedStockActions)
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("profiles", JSONArray().also { arr -> profiles.forEach { arr.put(it.toJson()) } })
         put("activeProfileId", activeProfileId ?: JSONObject.NULL)
-        put("defaultAction", defaultQuickAction.id)
+        put("quickActions", JSONArray().also { arr -> quickActions.forEach { arr.put(it.toJson()) } })
+        put("defaultAction", defaultActionId)
         put("requireConfirmationBeforeSend", requireConfirmationBeforeSend)
         put("searchOnSelect", searchOnSelect)
         put("googleTabsEnabled", googleTabsEnabled)
@@ -279,6 +356,17 @@ data class AppSettings(
                 }
             }?.ifEmpty { null } ?: listOf("eng")
 
+            // Settings from before custom actions have no list: they keep the stock one.
+            val actions = json.optJSONArray("quickActions")?.let { arr ->
+                buildList {
+                    for (i in 0 until arr.length()) {
+                        val item = arr.optJSONObject(i) ?: continue
+                        val action = QuickAction.fromJson(item) ?: continue
+                        if (none { it.id == action.id }) add(action)
+                    }
+                }
+            } ?: QuickAction.STOCK
+
             val activations = json.optJSONArray("enabledActivations")?.let { arr ->
                 buildList { for (i in 0 until arr.length()) add(arr.getString(i)) }.toSet()
             } ?: setOf(ACTIVATION_ASSISTANT)
@@ -288,7 +376,8 @@ data class AppSettings(
                 activeProfileId = json.optString("activeProfileId").takeIf {
                     it.isNotBlank() && it != "null"
                 },
-                defaultQuickAction = QuickAction.fromId(json.optString("defaultAction")),
+                quickActions = actions,
+                defaultActionId = json.optString("defaultAction").trim().ifEmpty { QuickAction.ASK.id },
                 requireConfirmationBeforeSend = json.optBoolean("requireConfirmationBeforeSend", false),
                 searchOnSelect = json.optBoolean("searchOnSelect", false),
                 googleTabsEnabled = json.optBoolean("googleTabsEnabled", true),
@@ -360,6 +449,7 @@ fun ProviderProfile.toJson(): JSONObject = JSONObject().apply {
     put("contextWindowOverride", contextWindowOverride ?: JSONObject.NULL)
     put("reasoningMode", reasoningMode.id)
     put("reasoningTokenBudget", reasoningTokenBudget ?: JSONObject.NULL)
+    put("customReasoning", customReasoning.toJson())
     put("imageDetail", imageDetail.id)
     put("jpegQuality", jpegQuality)
     put("maxImageEdgePx", maxImageEdgePx)
@@ -383,10 +473,28 @@ private fun ModelSettings.toJson(): JSONObject = JSONObject().apply {
     put("contextWindowOverride", contextWindowOverride ?: JSONObject.NULL)
     put("reasoningMode", reasoningMode.id)
     put("reasoningTokenBudget", reasoningTokenBudget ?: JSONObject.NULL)
+    put("customReasoning", customReasoning.toJson())
     put("visionOverride", visionOverride.name)
     put("reasoningOverride", reasoningOverride.name)
     put("mechanismOverride", mechanismOverride?.name ?: JSONObject.NULL)
     put("imageOutputOverride", imageOutputOverride.name)
+}
+
+private fun CustomReasoning.toJson(): JSONObject = JSONObject().apply {
+    put("selected", selected ?: JSONObject.NULL)
+    put("added", JSONArray(added))
+    put("hidden", JSONArray(hidden.sorted()))
+}
+
+/** Saved reasoning edits; anything missing or malformed reads as none. */
+private fun customReasoningFromJson(json: JSONObject?): CustomReasoning {
+    json ?: return CustomReasoning()
+    fun strings(key: String) = json.optJSONArray(key)?.let { arr ->
+        (0 until arr.length()).mapNotNull { arr.optString(it).trim().takeIf(String::isNotEmpty) }
+    }.orEmpty()
+    val added = strings("added").distinct()
+    val selected = json.optString("selected").trim().takeIf { !json.isNull("selected") && it in added }
+    return CustomReasoning(selected = selected, added = added, hidden = strings("hidden").toSet())
 }
 
 private fun modelSettingsFromJson(json: JSONObject) = ModelSettings(
@@ -397,6 +505,7 @@ private fun modelSettingsFromJson(json: JSONObject) = ModelSettings(
     contextWindowOverride = json.optIntOrNull("contextWindowOverride"),
     reasoningMode = ReasoningMode.fromId(json.optString("reasoningMode")),
     reasoningTokenBudget = json.optIntOrNull("reasoningTokenBudget"),
+    customReasoning = customReasoningFromJson(json.optJSONObject("customReasoning")),
     visionOverride = runCatching { Tri.valueOf(json.optString("visionOverride", "UNKNOWN")) }
         .getOrDefault(Tri.UNKNOWN),
     reasoningOverride = runCatching { Tri.valueOf(json.optString("reasoningOverride", "UNKNOWN")) }
@@ -461,6 +570,7 @@ fun ProviderProfile.Companion.fromJson(json: JSONObject): ProviderProfile = Prov
     contextWindowOverride = json.optIntOrNull("contextWindowOverride"),
     reasoningMode = ReasoningMode.fromId(json.optString("reasoningMode")),
     reasoningTokenBudget = json.optIntOrNull("reasoningTokenBudget"),
+    customReasoning = customReasoningFromJson(json.optJSONObject("customReasoning")),
     imageDetail = ImageDetail.entries.firstOrNull { it.id == json.optString("imageDetail") }
         ?: ImageDetail.AUTO,
     jpegQuality = json.optInt("jpegQuality", 85),

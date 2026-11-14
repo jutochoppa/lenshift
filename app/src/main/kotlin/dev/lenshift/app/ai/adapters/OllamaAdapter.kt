@@ -60,7 +60,7 @@ class OllamaAdapter : BaseAdapter() {
         profile.maxOutputTokens?.let { options.put("num_predict", it) }
         if (options.length() > 0) body.put("options", options)
 
-        ReasoningMapper.applyOllama(body, request.reasoningMode, request.capabilities)
+        ReasoningMapper.applyOllama(body, request.reasoningMode, request.capabilities, request.profile.customReasoning.selected)
 
         if (profile.extraJsonParameters.isNotBlank()) {
             runCatching {

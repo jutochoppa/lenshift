@@ -1,11 +1,21 @@
 package dev.lenshift.app.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.TextFieldValue
+import dev.lenshift.app.ai.ReasoningOptions
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -48,6 +58,132 @@ import dev.lenshift.app.ai.ProviderProfile
 import dev.lenshift.app.ai.ReasoningMapper
 import dev.lenshift.app.ai.ReasoningMode
 import dev.lenshift.app.ai.Tri
+
+/**
+ * The current model's reasoning levels as chips: Automatic, its built-in levels and the
+ * user's own. "Edit levels" deletes any of them, adds levels of the user's own (sent exactly
+ * as written, for models that take values such as "min" or "extended") and brings deleted
+ * built-in levels back.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ReasoningLevels(
+    profile: ProviderProfile,
+    capabilities: ModelCapabilities,
+    nestedEffort: Boolean,
+    onChange: (ProviderProfile) -> Unit
+) {
+    var editing by remember(profile.modelId) { mutableStateOf(false) }
+    // A TextFieldValue, so clearing it also ends the keyboard's composing word; cleared as a
+    // plain string, the keyboard put the last word back after each level was added.
+    var draft by remember(profile.modelId) { mutableStateOf(TextFieldValue("")) }
+    val options = ReasoningOptions.options(profile, capabilities)
+    val selected = ReasoningOptions.selectedKey(profile, capabilities)
+
+    FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        LevelChip("Automatic", selected == ReasoningOptions.AUTOMATIC, onRemove = null) {
+            onChange(ReasoningOptions.select(profile, ReasoningOptions.AUTOMATIC))
+        }
+        options.forEach { option ->
+            LevelChip(
+                label = option.label,
+                selected = selected == option.key,
+                onRemove = if (editing) {
+                    { onChange(ReasoningOptions.remove(profile, option.key, capabilities)) }
+                } else null
+            ) { onChange(ReasoningOptions.select(profile, option.key)) }
+        }
+    }
+    Text(
+        ReasoningMapper.wireValue(
+            ReasoningMapper.effectiveMode(profile.reasoningMode, capabilities),
+            capabilities,
+            nestedEffort,
+            profile.reasoningTokenBudget,
+            profile.customReasoning.selected
+        ),
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+    )
+    if (!editing) {
+        TextButton(onClick = { editing = true }, modifier = Modifier.padding(horizontal = 4.dp)) { Text("Edit levels") }
+        return
+    }
+    val focus = LocalFocusManager.current
+    fun add() {
+        if (draft.text.isBlank()) return
+        onChange(ReasoningOptions.add(profile, draft.text, capabilities))
+        draft = TextFieldValue("")
+        // Closing the keyboard ends its word, so it doesn't redraw the level just added.
+        focus.clearFocus()
+    }
+    Row(
+        modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { if (it.text.length <= ReasoningOptions.MAX_LENGTH) draft = it },
+            label = { Text("Add a level", fontSize = 12.sp) },
+            placeholder = { Text("standard", fontSize = 12.sp) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { add() }),
+            modifier = Modifier.weight(1f)
+        )
+        TextButton(onClick = ::add, enabled = draft.text.isNotBlank()) { Text("Add") }
+    }
+    Text(
+        "Levels you add are sent exactly as written, for models or relays that take their own values, " +
+            "such as min, standard or extended. Tap × to delete a level.",
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+    )
+    Row(modifier = Modifier.padding(horizontal = 4.dp)) {
+        if (profile.customReasoning.hidden.isNotEmpty()) {
+            TextButton(onClick = { onChange(ReasoningOptions.restoreDefaults(profile)) }) { Text("Restore defaults") }
+        }
+        TextButton(onClick = { editing = false; draft = TextFieldValue("") }) { Text("Done") }
+    }
+}
+
+/** A reasoning level chip; [onRemove] adds a delete button while editing. */
+@Composable
+private fun LevelChip(label: String, selected: Boolean, onRemove: (() -> Unit)?, onClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.clickable(role = Role.RadioButton, onClick = onClick)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 12.dp, end = if (onRemove == null) 12.dp else 4.dp, top = 6.dp, bottom = 6.dp)
+        ) {
+            Text(label, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (onRemove != null) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "Delete $label",
+                    modifier = Modifier
+                        .padding(start = 4.dp)
+                        .size(18.dp)
+                        .clip(RoundedCornerShape(50))
+                        .clickable(role = Role.Button, onClick = onRemove)
+                        .padding(2.dp)
+                )
+            }
+        }
+    }
+}
 
 /**
  * The provider's saved models: pick the current one, remove any, and add more from the
@@ -307,18 +443,7 @@ fun CurrentModelSettings(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
         )
     } else {
-        val shown = ReasoningMapper.effectiveMode(profile.reasoningMode, capabilities)
-        ChipRow(
-            options = (listOf(ReasoningMode.AUTO) + levels).map { it.id to it.label },
-            selectedId = shown.id,
-            onSelect = { onChange(profile.copy(reasoningMode = ReasoningMode.fromId(it))) }
-        )
-        Text(
-            ReasoningMapper.wireValue(shown, capabilities, nestedEffort, profile.reasoningTokenBudget),
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
-        )
+        ReasoningLevels(profile, capabilities, nestedEffort, onChange)
     }
 
     // ---- sampling and limits

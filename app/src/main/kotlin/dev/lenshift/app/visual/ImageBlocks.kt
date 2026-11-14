@@ -24,7 +24,11 @@ enum class VisualKind {
  */
 object ImageBlocks {
 
-    /** What one block asks for. [input] is "selection" or "previous" when it edits an image. */
+    /**
+     * What one block asks for. [input] names the picture it edits: "selection" (what the
+     * user selected), "previous" (the last picture made) or "attached" (the user's own
+     * images on that turn).
+     */
     data class Request(val index: Int, val prompt: String, val aspect: String?, val input: String?, val complete: Boolean)
 
     fun find(markdown: String): List<Request> =
@@ -44,7 +48,7 @@ object ImageBlocks {
                         index,
                         prompt,
                         aspect(json.optString("aspect").ifBlank { json.optString("aspectRatio") }),
-                        json.optString("input").trim().lowercase().takeIf { it == "selection" || it == "previous" },
+                        json.optString("input").trim().lowercase().takeIf { it in INPUTS },
                         complete
                     )
                 }
@@ -52,6 +56,8 @@ object ImageBlocks {
         }
         return Request(index, trimmed, null, null, complete)
     }
+
+    private val INPUTS = setOf("selection", "previous", "attached")
 
     /** "16:9", "landscape", "square", … as a ratio the image APIs know, or null. */
     fun aspect(text: String?): String? = when (text?.trim()?.lowercase()) {

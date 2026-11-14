@@ -14,6 +14,8 @@ class LenshiftApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Debug builds only: provider errors are kept in files/debug for adb to read.
+        dev.lenshift.app.ai.transport.ProviderLog.init(filesDir)
         ServiceLocator.init(this)
         // Touch the settings store once so the encrypted credential keystore is ready
         // before the first assistant invocation, which keeps cold-start latency low.
