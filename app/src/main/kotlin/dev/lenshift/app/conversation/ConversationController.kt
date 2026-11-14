@@ -634,7 +634,10 @@ class ConversationController(
                     val encoded = ImageEncoder.encode(bitmap, maxEdgePx = 1536, jpegQuality = 90, detail = ImageDetail.AUTO)
                     EncodedImage(encoded.base64, encoded.mimeType)
                 }
-                val bytes = ImageGeneration.generate(profile, apiKey, ImageRequest(block.prompt, block.aspect, inputs), callKey)
+                val request = ImageRequest(block.prompt, block.aspect, inputs)
+                val bytes = ImageGeneration.withOneRetry(
+                    onRetry = { e -> ProviderLog.failed("image", profile, "${describe(e)} Trying once more.") }
+                ) { ImageGeneration.generate(profile, apiKey, request, callKey) }
                 val bitmap = decode(bytes.first()) ?: throw AiError.Protocol("The picture could not be read.")
                 val id = java.util.UUID.randomUUID().toString()
                 attachmentImages[id] = bitmap

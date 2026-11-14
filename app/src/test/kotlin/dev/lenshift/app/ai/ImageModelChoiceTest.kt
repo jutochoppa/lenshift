@@ -105,6 +105,32 @@ class ImageModelChoiceTest {
     }
 
     @Test
+    fun `a passing image service error is tried once more`() = kotlinx.coroutines.runBlocking {
+        // ChatGPT2API's reply when ChatGPT's image tool hiccups; the same prompt worked right after.
+        val hiccup = AiError.Server(502, "The image generation tool encountered an error. Please try again.")
+        var calls = 0
+        val retried = mutableListOf<AiError>()
+        val picture = ImageGeneration.withOneRetry(waitMs = 0, onRetry = { retried += it }) {
+            if (++calls == 1) throw hiccup else "picture"
+        }
+        assertEquals("picture", picture)
+        assertEquals(2, calls)
+        assertEquals(listOf<AiError>(hiccup), retried)
+
+        // Refusals, limits and timeouts are reported at once, and a second failure is final.
+        for (final in listOf(AiError.Server(400, "content policy"), AiError.RateLimited("busy"), AiError.Timeout("slow"))) {
+            calls = 0
+            val thrown = runCatching { ImageGeneration.withOneRetry<String>(waitMs = 0) { calls++; throw final } }.exceptionOrNull()
+            assertEquals(final, thrown)
+            assertEquals(1, calls)
+        }
+        calls = 0
+        val twice = runCatching { ImageGeneration.withOneRetry<String>(waitMs = 0) { calls++; throw AiError.Server(503, "down") } }
+        assertEquals(2, calls)
+        assertTrue(twice.exceptionOrNull() is AiError.Server)
+    }
+
+    @Test
     fun `a relay's own error event becomes its message`() {
         assertTrue(StreamErrors.isError("UpstreamHTTPError"))
         assertTrue(StreamErrors.isError("response.failed"))

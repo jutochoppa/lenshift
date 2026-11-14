@@ -229,6 +229,27 @@ object ImageGeneration {
         runCatching { java.util.Base64.getMimeDecoder().decode(base64) }.getOrNull()?.let { ImageData.Bytes(it) }
 
     /**
+     * A failure worth one more try: the image service's own server error (5xx), which relays
+     * such as ChatGPT2API return for passing hiccups ("Please try again"). Refusals (4xx),
+     * rate limits and timeouts are reported straight away.
+     */
+    fun isWorthRetrying(error: AiError): Boolean = error is AiError.Server && error.status in 500..599
+
+    /**
+     * Runs [make]; after a temporary failure ([isWorthRetrying]) waits [waitMs] and tries
+     * once more, so a passing error doesn't need the user's Retry.
+     */
+    suspend fun <T> withOneRetry(waitMs: Long = 2_000, onRetry: (AiError) -> Unit = {}, make: suspend () -> T): T =
+        try {
+            make()
+        } catch (e: AiError) {
+            if (!isWorthRetrying(e)) throw e
+            onRetry(e)
+            kotlinx.coroutines.delay(waitMs)
+            make()
+        }
+
+    /**
      * Makes the picture with [profile]'s current model and returns its encoded bytes. The
      * call is tagged with [callKey], so stopping the chat leaves it running and
      * [CallRegistry.cancelBackground] can end it.
